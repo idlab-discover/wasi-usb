@@ -1,4 +1,3 @@
-package component:usb@0.2.1;
 
 interface usb-hotplug {
     use errors.{libusb-error};
