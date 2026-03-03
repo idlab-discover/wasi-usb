@@ -1,6 +1,8 @@
 use libusb1_sys::constants::{
     LIBUSB_TRANSFER_COMPLETED, LIBUSB_TRANSFER_TYPE_BULK, LIBUSB_TRANSFER_TYPE_CONTROL,
     LIBUSB_TRANSFER_TYPE_INTERRUPT, LIBUSB_TRANSFER_TYPE_ISOCHRONOUS,
+    LIBUSB_TRANSFER_TIMED_OUT, LIBUSB_TRANSFER_CANCELLED, LIBUSB_TRANSFER_STALL,
+    LIBUSB_TRANSFER_NO_DEVICE, LIBUSB_TRANSFER_OVERFLOW, LIBUSB_TRANSFER_ERROR,
 };
 use libusb1_sys::{
     libusb_alloc_streams, libusb_alloc_transfer, libusb_cancel_transfer, libusb_close,
@@ -12,7 +14,7 @@ use wasmtime::component::*;
 use wasmtime::{Config, Error};
 use wasmtime::{Engine, Store};
 use wasmtime_wasi::bindings::Command;
-use wasmtime_wasi::{DirPerms, FilePerms, IoView, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::{DirPerms, FilePerms, IoView, WasiCtx, WasiCtxBuilder, WasiView, I32Exit};
 
 use std::env;
 use log::{debug, error, info, trace, warn, LevelFilter};
@@ -220,8 +222,9 @@ extern "system" fn transfer_callback(transfer: *mut libusb_transfer) {
                             }
                         }
                     } else {
-                        // OUT transfer: no data to return
-                        data_vec = Vec::new();
+                        // OUT transfer: return dummy vector of actual length
+                        // so the guest can know how many bytes were transferred
+                        data_vec = std::iter::repeat(0).take(actual_len).collect();
                     }
                 }
                 Ok(data_vec)
@@ -885,9 +888,18 @@ async fn main() -> Result<(), Error> {
     wasmtime_wasi::add_to_linker_async(&mut linker)?;
     let mut store = Store::new(&engine, MyState::new(allowed_usbdevices, wasi_args));
     let command = Command::instantiate_async(&mut store, &component, &linker).await?;
-    match command.wasi_cli_run().call_run(store).await? {
-        Ok(_) => {},
-        Err(_) => error!("WASM component returned an error"),
+    match command.wasi_cli_run().call_run(store).await {
+        Ok(Ok(_)) => {},
+        Ok(Err(_)) => error!("WASM component returned an error"),
+        Err(e) => {
+            if let Some(exit) = e.downcast_ref::<I32Exit>() {
+                if exit.0 != 0 {
+                    error!("WASM component exited with non-zero status: {}", exit.0);
+                }
+            } else {
+                return Err(e);
+            }
+        }
     }
     info!("WASM component finished");
     Ok(())
