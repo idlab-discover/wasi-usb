@@ -156,55 +156,56 @@ fn main() {
         //------------------------------------
         // Optionally list each configuration’s total length and endpoints
         //------------------------------------
-        // for cfg in 0..num_cfg {
-        //     // first fetch the 9‐byte header
-        //     if let Ok(buf9) = control_in(&handle, 0x06, 0x0200 | cfg as u16, 0, 9) {
-        //         if buf9.len() == 9 {
-        //             let total_len = u16::from_le_bytes([buf9[2], buf9[3]]);
-        //             let num_ifaces = buf9[4];
-        //             println!(
-        //                 "  [cfg {:02}] total_len={}  interfaces={}",
-        //                 cfg, total_len, num_ifaces
-        //             );
-        //             // now fetch the full block
-        //             if let Ok(full) =
-        //                 control_in(&handle, 0x06, 0x0200 | cfg as u16, 0, total_len)
-        //             {
-        //                 // parse sub‐descriptors starting at offset 9
-        //                 let mut i = 9;
-        //                 while i + 1 < full.len() {
-        //                     let len = full[i] as usize;
-        //                     let dtype = full[i + 1];
-        //                     match dtype {
-        //                         4 => {
-        //                             // interface descriptor
-        //                             let iface = full[i + 2];
-        //                             let alt   = full[i + 3];
-        //                             let epcnt = full[i + 4];
-        //                             println!(
-        //                                 "    Interface {} alt {} endpoints={}",
-        //                                 iface, alt, epcnt
-        //                             );
-        //                         }
-        //                         5 => {
-        //                             // endpoint descriptor
-        //                             let addr    = full[i + 2];
-        //                             let attrs   = full[i + 3];
-        //                             let mx      = u16::from_le_bytes([full[i + 4], full[i + 5]]);
-        //                             let interval= full[i + 6];
-        //                             println!(
-        //                                 "      Endpoint addr=0x{:02x} attrs=0x{:02x} max_pkt={} interval={}",
-        //                                 addr, attrs, mx, interval
-        //                             );
-        //                         }
-        //                         _ => {}
-        //                     }
-        //                     i += len.max(1);
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
+        for cfg in 0..num_cfg {
+            // first fetch the 9‐byte header
+            if let Ok(buf9) = control_in(&handle, 0x06, 0x0200 | cfg as u16, 0, 9) {
+                if buf9.len() == 9 {
+                    let total_len = u16::from_le_bytes([buf9[2], buf9[3]]);
+                    let num_ifaces = buf9[4];
+                    println!(
+                        "  [cfg {:02}] total_len={}  interfaces={}",
+                        cfg, total_len, num_ifaces
+                    );
+                    // now fetch the full block
+                    if let Ok(full) =
+                        control_in(&handle, 0x06, 0x0200 | cfg as u16, 0, total_len)
+                    {
+                        // parse sub‐descriptors starting at offset 9
+                        let mut i = 9;
+                        while i + 1 < full.len() {
+                            let len = full[i] as usize;
+                            if i + len > full.len() { break; }
+                            let dtype = full[i + 1];
+                            match dtype {
+                                4 => {
+                                    // interface descriptor
+                                    let iface = full[i + 2];
+                                    let alt   = full[i + 3];
+                                    let epcnt = full[i + 4];
+                                    println!(
+                                        "    Interface {} alt {} endpoints={}",
+                                        iface, alt, epcnt
+                                    );
+                                }
+                                5 => {
+                                    // endpoint descriptor
+                                    let addr    = full[i + 2];
+                                    let attrs   = full[i + 3];
+                                    let mx      = u16::from_le_bytes([full[i + 4], full[i + 5]]);
+                                    let interval= full[i + 6];
+                                    println!(
+                                        "      Endpoint addr=0x{:02x} attrs=0x{:02x} max_pkt={} interval={}",
+                                        addr, attrs, mx, interval
+                                    );
+                                }
+                                _ => {}
+                            }
+                            i += len.max(1);
+                        }
+                    }
+                }
+            }
+        }
 
         //------------------------------------
         // close handle

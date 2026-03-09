@@ -5,7 +5,7 @@ edition = "2021"
 description = "wasmtime runtime that implements USB host component for WASI"
 
 [dependencies]
-libusb1-sys = "0.7.0"
+libusb1-sys = { path = "../../usb-wasm/rusb-wasi/libusb1-sys", features = ["vendored"] }
 tokio = { version = "1.44.2", features = ["rt", "rt-multi-thread", "macros"] }
 wasmtime = { version = "31.0.0", features = ["component-model-async"]}
 wasmtime-wasi = "31.0.0"

@@ -309,8 +309,11 @@ impl HostUsbBackend for LibusbBackend {
             let mut handle_ptr: *mut libusb_device_handle = std::ptr::null_mut();
             let res = libusb_open(device_ptr, &mut handle_ptr);
             if res < 0 {
-                return Err(LibusbError::from_raw(res));
+                let err = LibusbError::from_raw(res);
+                error!("libusb_open failed with error: {:?}", err);
+                return Err(err);
             }
+            debug!("libusb_open successful, handle_ptr: {:?}", handle_ptr);
             Ok(UsbDeviceHandle { handle: handle_ptr })
         }
     }
@@ -349,10 +352,13 @@ impl HostUsbBackend for LibusbBackend {
     fn claim_interface(&mut self, handle: &UsbDeviceHandle, ifac: u8) -> Result<(), LibusbError> {
         unsafe {
             let res = libusb_claim_interface(handle.handle, ifac as i32);
-             match res {
-                0.. => Ok(()),
-                _ => Err(LibusbError::from_raw(res)),
+            if res < 0 {
+                let err = LibusbError::from_raw(res);
+                error!("libusb_claim_interface failed for ifac {} with error: {:?}", ifac, err);
+                return Err(err);
             }
+            info!("libusb_claim_interface successful for ifac {}", ifac);
+            Ok(())
         }
     }
 
