@@ -56,9 +56,9 @@ bindgen!({
     world: "host",
     path: "../wit",
     with: {
-        "component:usb/transfers/transfer": UsbTransfer,
-        "component:usb/device/usb-device": UsbDevice,
-        "component:usb/device/device-handle": UsbDeviceHandle,
+        "component:usb/transfers@0.2.1/transfer": UsbTransfer,
+        "component:usb/device@0.2.1/usb-device": UsbDevice,
+        "component:usb/device@0.2.1/device-handle": UsbDeviceHandle,
     },
     async: {
         only_imports: ["await-transfer", "await-iso-transfer"]
@@ -173,6 +173,7 @@ extern "system" fn transfer_callback(transfer: *mut libusb_transfer) {
         let ctx = Box::from_raw(ctx_ptr);
 
         let status = (*transfer).status;
+        info!("transfer_callback fired, status: {}", status);
         let result: Result<Vec<u8>, LibusbError> =
             if status == LIBUSB_TRANSFER_COMPLETED {
                 let mut data_vec = Vec::new();
@@ -182,16 +183,21 @@ extern "system" fn transfer_callback(transfer: *mut libusb_transfer) {
                     let num_packets = (*transfer).num_iso_packets as usize;
                     let mut packet_results: Vec<(u32, i32)> = Vec::with_capacity(num_packets);
 
+                    let mut total_actual_len = 0u32;
                     for i in 0..num_packets {
-                        let desc = (*transfer).iso_packet_desc.as_ptr().add(i);
-                        packet_results.push(((*desc).actual_length, (*desc).status as i32));
+                        let desc_ptr = ((*transfer).iso_packet_desc.as_ptr() as *const libusb1_sys::libusb_iso_packet_descriptor).add(i);
+                        let desc = &*desc_ptr;
+                        packet_results.push((desc.actual_length, desc.status as i32));
+                        total_actual_len += desc.actual_length;
                     }
+                    info!("ISO transfer received {} total actual bytes", total_actual_len);
 
                     // Store per-packet results so await-iso-transfer can read them
                     *ctx.iso_packet_results.lock().unwrap() = Some(packet_results);
 
                     // Copy full buffer (stride = packet_size, not actual_length)
                     let full_len = (*transfer).length as usize;
+                    info!("ISO transfer received {} bytes of data", full_len);
                     let buf_ptr = (*transfer).buffer;
                     if !buf_ptr.is_null() && full_len > 0 {
                         let data_slice = std::slice::from_raw_parts(buf_ptr, full_len);
@@ -764,13 +770,14 @@ impl HostDeviceHandle for MyState {
                 let rem = buf_size % iso_packets as u32;
 
                 for i in 0..packet_count {
-                    let desc = (*transfer_ptr).iso_packet_desc.as_mut_ptr().add(i);
+                    let desc_ptr = ((*transfer_ptr).iso_packet_desc.as_mut_ptr() as *mut libusb1_sys::libusb_iso_packet_descriptor).add(i);
+                    let desc = &mut *desc_ptr;
                     let packet_len = if i == packet_count - 1 {
                         base_len + rem
                     } else {
                         base_len
                     };
-                    (*desc).length = packet_len;
+                    desc.length = packet_len;
                     debug!("Iso packet {} configured with length: {}", i, packet_len);
                 }
                 (*transfer_ptr).num_iso_packets = iso_packets;

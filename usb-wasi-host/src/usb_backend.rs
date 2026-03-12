@@ -27,6 +27,7 @@ use libusb1_sys::{
     libusb_ref_device, libusb_unref_device, libusb_open, libusb_close,
     libusb_get_configuration, libusb_set_configuration, libusb_claim_interface, libusb_release_interface,
     libusb_set_interface_alt_setting, libusb_clear_halt, libusb_reset_device,
+    libusb_set_auto_detach_kernel_driver,
     libusb_kernel_driver_active, libusb_detach_kernel_driver, libusb_attach_kernel_driver,
     libusb_has_capability, libusb_hotplug_callback_handle, libusb_hotplug_register_callback,
     libusb_handle_events_timeout_completed,
@@ -41,7 +42,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::VecDeque;
 use std::thread;
 use std::time::Duration;
-use log::{debug, error, info, warn};
+use log::{debug, error, info, warn, trace};
 use libc::timeval;
 use once_cell::sync::Lazy;
 use crate::AllowedUSBDevices;
@@ -191,6 +192,7 @@ impl HostUsbBackend for LibusbBackend {
                         error!("Error in libusb_handle_events_timeout: {}", rc);
                         break;
                     }
+                    trace!("Event loop iteration completed");
                 }
             });
             self.event_thread = Some(handle);
@@ -199,7 +201,15 @@ impl HostUsbBackend for LibusbBackend {
     }
 
     fn list_devices(&mut self, allowed_devices: &AllowedUSBDevices) -> Result<Vec<(UsbDevice, DeviceDescriptor, DeviceLocation)>, LibusbError> {
-        info!("list_devices backend called.");
+            info!("list_devices backend called.");
+            println!("[HOST] Size of DeviceDescriptor: {}", std::mem::size_of::<DeviceDescriptor>());
+            println!("[HOST] Align of DeviceDescriptor: {}", std::mem::align_of::<DeviceDescriptor>());
+            println!("[HOST] Size of DeviceLocation: {}", std::mem::size_of::<DeviceLocation>());
+            println!("[HOST] Align of DeviceLocation: {}", std::mem::align_of::<DeviceLocation>());
+            println!("[HOST] Offset of bus_number: {}", memoffset::offset_of!(DeviceLocation, bus_number));
+            println!("[HOST] Offset of device_address: {}", memoffset::offset_of!(DeviceLocation, device_address));
+            println!("[HOST] Offset of port_number: {}", memoffset::offset_of!(DeviceLocation, port_number));
+            println!("[HOST] Offset of speed: {}", memoffset::offset_of!(DeviceLocation, speed));
         unsafe {
             let mut list_ptr: *mut *mut libusb_device = std::ptr::null_mut();
             let cnt = libusb_get_device_list(
@@ -226,6 +236,7 @@ impl HostUsbBackend for LibusbBackend {
                 if !allowed_devices.is_allowed(&usb_device_id) {
                     continue;
                 }
+                println!("[HOST] processing device {:04x}:{:04x}", device_desc.idVendor, device_desc.idProduct);
 
                 libusb_ref_device(dev); // Increment refcount because we store it in UsbDevice which owns it
                 let resource = UsbDevice { device: dev };
@@ -236,6 +247,7 @@ impl HostUsbBackend for LibusbBackend {
                     port_number: libusb_get_port_number(dev),
                     speed: UsbSpeed::from_raw(libusb_get_device_speed(dev) as u8)
                 };
+                println!("[HOST] device location: {:?}", location);
                 
                 let descriptor = DeviceDescriptor {
                     length: device_desc.bLength,
@@ -253,9 +265,11 @@ impl HostUsbBackend for LibusbBackend {
                     serial_number_index: device_desc.iSerialNumber,
                     num_configurations: device_desc.bNumConfigurations,
                 };
+                println!("[HOST] device descriptor: {:?}", descriptor);
                 
                 devices.push((resource, descriptor, location));
             }
+            println!("[HOST] found {} devices", devices.len());
             libusb_free_device_list(list_ptr, 1); // 1 = unref devices in list (but we reffed the ones we kept)
             Ok(devices)
         }
@@ -314,6 +328,8 @@ impl HostUsbBackend for LibusbBackend {
                 return Err(err);
             }
             debug!("libusb_open successful, handle_ptr: {:?}", handle_ptr);
+            // Enable auto-detach (ignore errors as some platforms/devices don't support it)
+            let _ = libusb_set_auto_detach_kernel_driver(handle_ptr, 1);
             Ok(UsbDeviceHandle { handle: handle_ptr })
         }
     }
@@ -480,8 +496,8 @@ unsafe fn generate_config_descriptor(raw_descriptor: &libusb1_sys::libusb_config
     for i in 0..raw_descriptor.bNumInterfaces {
         let interface = &*raw_descriptor.interface.wrapping_add(i as usize);
         for j in 0..interface.num_altsetting {
-            let mut endpoints: Vec<EndpointDescriptor> = Vec::new();
             let alt_setting = &*interface.altsetting.wrapping_add(j as usize);
+            let mut endpoints: Vec<EndpointDescriptor> = Vec::new();
             for k in 0..alt_setting.bNumEndpoints {
                 let endpoint = &*alt_setting.endpoint.wrapping_add(k as usize);
                 let endpoint_desc = EndpointDescriptor {
