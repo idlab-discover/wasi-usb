@@ -3,6 +3,7 @@
 .vscode/
 helper/
 *.wasm
+*.jpg
 *.png
 *.yuyv
 
