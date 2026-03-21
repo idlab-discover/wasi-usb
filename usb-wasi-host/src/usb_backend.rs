@@ -1,12 +1,13 @@
-use wasmtime::component::Resource;
 use crate::component::usb::descriptors::{DeviceDescriptor, ConfigurationDescriptor};
 use crate::component::usb::device::{DeviceLocation};
 use crate::component::usb::errors::LibusbError;
 use crate::component::usb::usb_hotplug::{Event, Info};
 // Move struct definitions here
+#[derive(Clone, Copy)]
 pub struct UsbDevice {
     pub device: *mut libusb1_sys::libusb_device,
 }
+#[derive(Clone, Copy)]
 pub struct UsbDeviceHandle {
     pub handle: *mut libusb1_sys::libusb_device_handle,
 }
@@ -21,10 +22,10 @@ use crate::component::usb::configuration::ConfigValue;
 use crate::component::usb::device::UsbSpeed;
 
 use libusb1_sys::{
-    libusb_context, libusb_device, libusb_device_handle, libusb_init, libusb_exit,
+    libusb_context, libusb_device, libusb_device_handle, libusb_init,
     libusb_get_device_list, libusb_free_device_list, libusb_get_device_descriptor,
     libusb_get_bus_number, libusb_get_device_address, libusb_get_port_number, libusb_get_device_speed,
-    libusb_ref_device, libusb_unref_device, libusb_open, libusb_close,
+    libusb_ref_device, libusb_open, libusb_close,
     libusb_get_configuration, libusb_set_configuration, libusb_claim_interface, libusb_release_interface,
     libusb_set_interface_alt_setting, libusb_clear_halt, libusb_reset_device,
     libusb_set_auto_detach_kernel_driver,
@@ -41,8 +42,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::VecDeque;
 use std::thread;
-use std::time::Duration;
-use log::{debug, error, info, warn, trace};
+use log::{debug, error, info, trace};
 use libc::timeval;
 use once_cell::sync::Lazy;
 use crate::AllowedUSBDevices;

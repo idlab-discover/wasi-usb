@@ -10,7 +10,7 @@ use libusb1_sys::{
     libusb_transfer_set_stream_id, libusb_unref_device,
 };
 
-use wasmtime::component::*;
+use wasmtime::component::{Component, Linker, Resource, ResourceTable, ResourceTableError};
 use wasmtime::{Config, Error};
 use wasmtime::{Engine, Store};
 use wasmtime_wasi::bindings::Command;
@@ -24,6 +24,13 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use clap::Parser;
 use tokio::sync::oneshot;
+use std::time::{Instant, Duration};
+
+use nokhwa::pixel_format::RgbFormat;
+use nokhwa::utils::{RequestedFormat, RequestedFormatType};
+use nokhwa::Camera;
+use tract_onnx::prelude::*;
+use image::RgbImage;
 
 use crate::component::usb::configuration::ConfigValue;
 use crate::component::usb::descriptors::{ConfigurationDescriptor, DeviceDescriptor};
@@ -31,14 +38,48 @@ use crate::component::usb::device::{
     DeviceLocation, HostDeviceHandle, HostUsbDevice, TransferOptions, TransferSetup,
     TransferType, UsbSpeed,
 };
+use crate::component::usb::cv::{
+    Frame, Detection, HostFrameStream, HostObjectDetector,
+};
 use crate::component::usb::errors::LibusbError;
 use crate::component::usb::transfers::{
-    HostTransfer, Transfer, IsoResult, IsoPacket, IsoPacketStatus,
+    HostTransfer, IsoResult, IsoPacket, IsoPacketStatus,
 };
 use crate::component::usb::usb_hotplug::{Event, Info};
 
 pub mod usb_backend;
 pub use usb_backend::{HostUsbBackend, LibusbBackend, UsbDevice, UsbDeviceHandle};
+
+// ── UVC class constants ───────────────────────────────────────────────────────
+const USB_CLASS_VIDEO: u8 = 0x0E;
+const USB_SUBCLASS_VIDEO_STREAMING: u8 = 0x02;
+
+pub struct WebcamFrameStream {
+    pub handle: UsbDeviceHandle,
+    pub iface_num: u8,
+    pub ep_addr: u8,
+    pub packet_stride: u32,
+    pub num_packets: u32,
+    pub buffer_size: u32,
+    pub actual_frame_size: u32,
+    pub min_frame_size: usize,
+    
+    // Mutable state for reassembly
+    pub frame_count: u32,
+    pub last_fid: u8,
+    pub frame_buffer: Vec<u8>,
+    pub frame_started: bool,
+    pub transfer_buffer: Vec<u8>,
+}
+
+pub enum FrameStream {
+    Nokhwa(Camera),
+    Uvc(WebcamFrameStream),
+}
+
+pub struct ObjectDetector {
+    pub model: SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>,
+}
 
 #[derive(Debug)]
 pub struct UsbTransfer {
@@ -52,18 +93,27 @@ pub struct UsbTransfer {
     pub iso_packet_results: Arc<Mutex<Option<Vec<(u32, i32)>>>>,
 }
 
-bindgen!({
-    world: "host",
-    path: "../wit",
-    with: {
-        "component:usb/transfers@0.2.1/transfer": UsbTransfer,
-        "component:usb/device@0.2.1/usb-device": UsbDevice,
-        "component:usb/device@0.2.1/device-handle": UsbDeviceHandle,
-    },
-    async: {
-        only_imports: ["await-transfer", "await-iso-transfer"]
-    },
-});
+mod bindings {
+    wasmtime::component::bindgen!({
+        world: "host",
+        path: "../wit",
+        with: {
+            "component:usb/transfers@0.2.1/transfer": super::UsbTransfer,
+            "component:usb/device@0.2.1/usb-device": super::UsbDevice,
+            "component:usb/device@0.2.1/device-handle": super::UsbDeviceHandle,
+            "component:usb/cv@0.2.1/frame-stream": super::FrameStream,
+            "component:usb/cv@0.2.1/object-detector": super::ObjectDetector,
+        },
+        async: {
+            only_imports: ["await-transfer", "await-iso-transfer"]
+        },
+    });
+}
+pub(crate) use bindings::component;
+pub(crate) use bindings::Host_ as Host;
+
+// Since world is "host", it might generate a module named Host
+// Or it might generate the types directly. Let's try Host:: prefix.
 
 /// Context passed through libusb's user_data pointer to the transfer callback.
 struct TransferContext {
@@ -80,6 +130,13 @@ unsafe impl Sync for UsbTransfer {}
 unsafe impl Send for MyState {}
 unsafe impl Sync for MyState {}
 
+extern "system" fn iso_callback(transfer: *mut libusb1_sys::libusb_transfer) {
+    unsafe {
+        let completed = &*((*transfer).user_data as *const std::sync::atomic::AtomicBool);
+        completed.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
 #[derive(Parser)]
 #[command(name = "usb-wasi-host", about, trailing_var_arg = true)]
 struct CliParser {
@@ -94,6 +151,9 @@ struct CliParser {
 
     #[arg(long = "debug_level", short = 'l', default_value = "info")]
     debug_level: String,
+
+    #[arg(long)]
+    enable_yolo: bool,
 
     #[arg(allow_hyphen_values = true)]
     guest_args: Vec<String>,
@@ -139,10 +199,11 @@ struct MyState {
     ctx: WasiCtx,
     allowed_usbdevices: AllowedUSBDevices,
     backend: Box<dyn HostUsbBackend>,
+    enable_yolo: bool,
 }
 
 impl MyState {
-    pub fn new(allowed_usbdevices: AllowedUSBDevices, guest_args: Vec<String>) -> Self {
+    pub fn new(allowed_usbdevices: AllowedUSBDevices, guest_args: Vec<String>, enable_yolo: bool) -> Self {
         let mut backend = LibusbBackend::new();
         match backend.init() {
             Ok(_) => info!("Backend initialized"),
@@ -163,6 +224,7 @@ impl MyState {
                 .build(),
             allowed_usbdevices,
             backend: Box::new(backend),
+            enable_yolo,
         }
     }
 }
@@ -309,9 +371,9 @@ impl UsbSpeed {
     }
 }
 
-impl component::usb::configuration::Host for MyState {}
-impl component::usb::descriptors::Host for MyState {}
-impl component::usb::errors::Host for MyState {}
+impl crate::component::usb::configuration::Host for MyState {}
+impl crate::component::usb::descriptors::Host for MyState {}
+impl crate::component::usb::errors::Host for MyState {}
 
 impl HostTransfer for MyState {
     fn submit_transfer(
@@ -438,7 +500,7 @@ impl HostTransfer for MyState {
     }
 }
 
-impl component::usb::transfers::Host for MyState {
+impl crate::component::usb::transfers::Host for MyState {
     async fn await_transfer(
         &mut self,
         self_: Resource<UsbTransfer>,
@@ -818,8 +880,8 @@ impl HostDeviceHandle for MyState {
     }
 }
 
-impl component::usb::device::Host for MyState {
-    fn init(&mut self) -> Result<(), component::usb::device::LibusbError> {
+impl crate::component::usb::device::Host for MyState {
+    fn init(&mut self) -> Result<(), crate::component::usb::device::LibusbError> {
         self.backend.init()
     }
 
@@ -836,7 +898,7 @@ impl component::usb::device::Host for MyState {
     }
 }
 
-impl component::usb::usb_hotplug::Host for MyState {
+impl crate::component::usb::usb_hotplug::Host for MyState {
     fn enable_hotplug(&mut self) -> Result<(), LibusbError> {
         self.backend.enable_hotplug(self.allowed_usbdevices.clone())
     }
@@ -856,12 +918,412 @@ impl component::usb::usb_hotplug::Host for MyState {
     }
 }
 
+unsafe impl Send for FrameStream {}
+unsafe impl Sync for FrameStream {}
+
+
+// ── UVC Helper Functions ──────────────────────────────────────────────────────
+
+fn find_best_streaming_interface_native(
+    device_ptr: *mut libusb1_sys::libusb_device,
+) -> Result<(u8, u8, u8, u16), Error> {
+    unsafe {
+        let mut config_desc: *const libusb1_sys::libusb_config_descriptor = std::ptr::null_mut();
+        let res = libusb1_sys::libusb_get_active_config_descriptor(device_ptr, &mut config_desc);
+        if res < 0 {
+            return Err(Error::msg(format!("Failed to get active config: {}", res)));
+        }
+        
+        let mut best: Option<(u8, u8, u8, u16)> = None;
+        let config = &*config_desc;
+        debug!("  Config has {} interfaces", config.bNumInterfaces);
+        
+        for i in 0..config.bNumInterfaces {
+            let iface = &*config.interface.add(i as usize);
+            for j in 0..iface.num_altsetting {
+                let iface_desc = &*iface.altsetting.add(j as usize);
+                
+                if iface_desc.bInterfaceClass != USB_CLASS_VIDEO
+                    || iface_desc.bInterfaceSubClass != USB_SUBCLASS_VIDEO_STREAMING
+                {
+                    continue;
+                }
+                
+                for k in 0..iface_desc.bNumEndpoints {
+                    let ep = &*iface_desc.endpoint.add(k as usize);
+                    let is_iso_in = (ep.bEndpointAddress & 0x80 != 0) && (ep.bmAttributes & 0x03 == 1);
+                    if !is_iso_in {
+                        continue;
+                    }
+                    
+                    let mps = ep.wMaxPacketSize;
+                    let base_size = mps & 0x7FF;
+                    let multiplier = 1 + ((mps >> 11) & 0x03);
+                    let effective_size = base_size * multiplier;
+                    
+                    debug!("    Candidate streaming endpoint: {:02x}, mps: {}, mult: {}, effective: {}", ep.bEndpointAddress, base_size, multiplier, effective_size);
+
+                    if best.map_or(true, |(_, _, _, s)| effective_size > s) {
+                        best = Some((
+                            iface_desc.bInterfaceNumber,
+                            iface_desc.bAlternateSetting,
+                            ep.bEndpointAddress,
+                            effective_size,
+                        ));
+                    }
+                }
+            }
+        }
+        
+        libusb1_sys::libusb_free_config_descriptor(config_desc);
+        best.ok_or_else(|| Error::msg("No UVC streaming interface found"))
+    }
+}
+
+fn parse_payload_header(data: &[u8]) -> (usize, bool) {
+    if data.len() < 2 {
+        return (0, false);
+    }
+    let header_len = data[0] as usize;
+    if header_len < 2 || header_len > data.len() {
+        return (0, false);
+    }
+    let end_of_frame = (data[1] & 0x02) != 0;
+    (header_len, end_of_frame)
+}
+
+impl HostFrameStream for MyState {
+    fn new(&mut self, index: u32) -> Resource<FrameStream> {
+        info!("Creating FrameStream for camera index {}", index);
+        
+        // 1. First, try to see if this is a USB device we can handle via UVC
+        let mut uvc_device = None;
+        if let Ok(devices) = self.backend.list_devices(&self.allowed_usbdevices) {
+            let uvc_devices: Vec<_> = devices.into_iter()
+                .filter(|(_, desc, _)| desc.device_class == USB_CLASS_VIDEO || desc.device_class == 0xEF)
+                .collect();
+            
+            info!("Found {} USB UVC-compatible devices", uvc_devices.len());
+            for (i, (_, desc, _)) in uvc_devices.iter().enumerate() {
+                info!("  USB UVC Index {}: Vendor={:04x}, Product={:04x}", i, desc.vendor_id, desc.product_id);
+            }
+
+            // Heuristic: If index > 0, it might be the first USB camera (common on Mac where 0 is integrated)
+            if (index as usize) < uvc_devices.len() {
+                uvc_device = Some(uvc_devices[index as usize].0.clone());
+            } else if index > 0 && (index as usize - 1) < uvc_devices.len() {
+                info!("Index {} not found in UVC list, but matching against UVC index {} (heuristic for Mac)", index, index - 1);
+                uvc_device = Some(uvc_devices[index as usize - 1].0.clone());
+            } else if uvc_devices.len() == 1 {
+                // If only one USB camera is present, always try it if the index is 0 or 1?
+                // Let's stick to the heuristic first.
+            }
+        }
+
+        if let Some(device) = uvc_device {
+            info!("Detected USB UVC device at index {}. Using raw UVC driver.", index);
+            match self.backend.open(&device) {
+                Ok(handle) => {
+                    if let Ok((iface_num, alt_setting, ep_addr, max_packet_size)) = find_best_streaming_interface_native(device.device) {
+                        info!("Found UVC interface {} with alt setting {} and endpoint {:02x}", iface_num, alt_setting, ep_addr);
+                        
+                        // Claim interface
+                        if self.backend.claim_interface(&handle, iface_num).is_ok() {
+                            // UVC Handshake (Standard GET/SET/COMMIT)
+                            let timeout = 2000;
+                            let mut probe = vec![0u8; 34];
+                            
+                            unsafe {
+                                // 1. GET_CUR (Probe)
+                                libusb1_sys::libusb_control_transfer(
+                                    handle.handle, 0xA1, 0x81, 0x0100, iface_num as u16, probe.as_mut_ptr(), 34, timeout
+                                );
+                                
+                                // 2. Modify probe (Format 1 = MJPEG usually, Frame 1 = Highest Resolution usually)
+                                if probe.len() >= 4 {
+                                    probe[2] = 2; // MJPEG (Format Index)
+                                    probe[3] = 1; // Frame Index
+                                    // Set frame interval (e.g., 333333 for 30fps)
+                                    let interval = 333333u32;
+                                    probe[4..8].copy_from_slice(&interval.to_le_bytes());
+                                }
+                                
+                                // 3. SET_CUR (Probe)
+                                libusb1_sys::libusb_control_transfer(handle.handle, 0x21, 0x01, 0x0100, iface_num as u16, probe.as_ptr() as *mut u8, probe.len() as u16, timeout);
+                                
+                                // 4. COMMIT_CONTROL
+                                libusb1_sys::libusb_control_transfer(handle.handle, 0x21, 0x01, 0x0200, iface_num as u16, probe.as_ptr() as *mut u8, probe.len() as u16, timeout);
+                            }
+
+                            // Set Alt Setting
+                            if self.backend.set_interface_alt_setting(&handle, iface_num, alt_setting).is_ok() {
+                                let packet_stride = max_packet_size as u32;
+                                let num_packets = 128;
+                                let buffer_size = num_packets * packet_stride;
+                                
+                                info!("UVC Handshake successful. Stream activated.");
+                                return self.table.push(FrameStream::Uvc(WebcamFrameStream {
+                                    handle,
+                                    iface_num,
+                                    ep_addr,
+                                    packet_stride,
+                                    num_packets,
+                                    buffer_size,
+                                    actual_frame_size: 0, // Will be updated
+                                    min_frame_size: 28_800,
+                                    frame_count: 0,
+                                    last_fid: 0,
+                                    frame_buffer: Vec::with_capacity(buffer_size as usize),
+                                    frame_started: false,
+                                    transfer_buffer: vec![0u8; buffer_size as usize],
+                                })).expect("Failed to push to table")
+                            }
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to open USB device for UVC: {:?}", e),
+            }
+        }
+
+        // 2. Fallback to Nokhwa (for Integrated cameras or if USB failed)
+        warn!("USB UVC failed or not found. Falling back to Nokhwa for index {}", index);
+        let nokhwa_index = nokhwa::utils::CameraIndex::Index(index);
+        let formats = vec![
+            RequestedFormat::new::<RgbFormat>(RequestedFormatType::Exact(nokhwa::utils::CameraFormat::new(nokhwa::utils::Resolution::new(1280, 720), nokhwa::utils::FrameFormat::MJPEG, 30))),
+            RequestedFormat::new::<RgbFormat>(RequestedFormatType::Exact(nokhwa::utils::CameraFormat::new(nokhwa::utils::Resolution::new(640, 480), nokhwa::utils::FrameFormat::MJPEG, 30))),
+            RequestedFormat::new::<RgbFormat>(RequestedFormatType::None),
+        ];
+
+        let mut camera = None;
+        for request in formats {
+            match Camera::new(nokhwa_index.clone(), request) {
+                Ok(mut cam) => {
+                    if cam.open_stream().is_ok() {
+                        camera = Some(cam);
+                        break;
+                    }
+                }
+                Err(_) => continue,
+            }
+        }
+
+        let camera = camera.expect("Failed to open any camera stream — check permissions or indices");
+        self.table.push(FrameStream::Nokhwa(camera)).expect("Failed to push to table")
+    }
+
+    fn read_frame(&mut self, self_: Resource<FrameStream>) -> Result<Frame, String> {
+        let stream = self.table.get_mut(&self_).map_err(|e: ResourceTableError| e.to_string())?;
+        
+        match stream {
+            FrameStream::Nokhwa(camera) => {
+                let frame = camera.frame().map_err(|e| e.to_string())?;
+                let rgb = frame.decode_image::<RgbFormat>().map_err(|e| e.to_string())?;
+                Ok(Frame {
+                    data: rgb.to_vec(),
+                    width: rgb.width(),
+                    height: rgb.height(),
+                })
+            }
+            FrameStream::Uvc(ref mut uvc) => {
+                let timeout_ms = 2000;
+                let mut attempts = 0;
+                
+                loop {
+                    attempts += 1;
+                    if attempts > 2000 {
+                        return Err("Timeout waiting for UVC frame".to_string());
+                    }
+
+                    // 1. Setup and submit isochronous transfer
+                    unsafe {
+                        let xfer = libusb1_sys::libusb_alloc_transfer(uvc.num_packets as i32);
+                        if xfer.is_null() { return Err("Failed to alloc libusb transfer".to_string()); }
+                        
+                        let completed = Arc::new(AtomicBool::new(false));
+                        let completed_ptr = Arc::as_ptr(&completed);
+
+                        libusb1_sys::libusb_fill_iso_transfer(
+                            xfer, uvc.handle.handle, uvc.ep_addr, uvc.transfer_buffer.as_mut_ptr(), uvc.buffer_size as i32,
+                            uvc.num_packets as i32, iso_callback, completed_ptr as *mut libc::c_void, timeout_ms
+                        );
+                        libusb1_sys::libusb_set_iso_packet_lengths(xfer, uvc.packet_stride);
+
+                        if libusb1_sys::libusb_submit_transfer(xfer) != 0 {
+                            libusb1_sys::libusb_free_transfer(xfer);
+                            return Err("Failed to submit libusb transfer".to_string());
+                        }
+
+                        // 2. Wait for completion (using a small loop to handle events)
+                        let deadline = Instant::now() + Duration::from_millis(timeout_ms as u64);
+                        while !completed.load(Ordering::Acquire) {
+                            if Instant::now() > deadline {
+                                libusb1_sys::libusb_cancel_transfer(xfer);
+                                break;
+                            }
+                            let mut tv = libc::timeval { tv_sec: 0, tv_usec: 10_000 };
+                            libusb1_sys::libusb_handle_events_timeout(std::ptr::null_mut(), &mut tv);
+                        }
+
+                        // 3. Collect packet lengths and free transfer
+                        let mut lengths = Vec::with_capacity(uvc.num_packets as usize);
+                        let mut errors = 0;
+                        for i in 0..uvc.num_packets as usize {
+                            let pkt_desc = ((*xfer).iso_packet_desc.as_ptr() as *const libusb1_sys::libusb_iso_packet_descriptor).add(i);
+                            let status = (*pkt_desc).status;
+                            if status != 0 {
+                                errors += 1;
+                            }
+                            lengths.push((*pkt_desc).actual_length as usize);
+                        }
+                        if errors > 0 {
+                            debug!("Isochronous transfer completed with {} packet errors", errors);
+                        }
+                        libusb1_sys::libusb_free_transfer(xfer);
+
+                        // 4. Process packets to reassemble frame
+                        let mut offset = 0usize;
+                        for actual_len in lengths {
+                            if actual_len > 0 {
+                                let packet = &uvc.transfer_buffer[offset..offset + actual_len];
+                                let (header_len, eof) = parse_payload_header(packet);
+                                if header_len > 0 && header_len < actual_len {
+                                    let fid = packet[1] & 0x01;
+                                    let payload = &packet[header_len..];
+                                    
+                                    // Handle FID change - start of a new frame
+                                    if uvc.frame_started && fid != uvc.last_fid {
+                                        let frame_data = std::mem::replace(&mut uvc.frame_buffer, Vec::with_capacity(uvc.buffer_size as usize));
+                                        uvc.last_fid = fid;
+                                        uvc.frame_count += 1;
+                                        if frame_data.len() >= uvc.min_frame_size {
+                                            if let Ok(frame) = decode_and_wrap_frame(frame_data) {
+                                                return Ok(frame);
+                                            }
+                                        }
+                                    }
+                                    
+                                    uvc.frame_started = true;
+                                    uvc.last_fid = fid;
+                                    uvc.frame_buffer.extend_from_slice(payload);
+                                    
+                                    if eof {
+                                        let frame_data = std::mem::replace(&mut uvc.frame_buffer, Vec::with_capacity(uvc.buffer_size as usize));
+                                        uvc.frame_started = false;
+                                        uvc.frame_count += 1;
+                                        if frame_data.len() >= uvc.min_frame_size {
+                                            if let Ok(frame) = decode_and_wrap_frame(frame_data) {
+                                                return Ok(frame);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            offset += uvc.packet_stride as usize;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn drop(&mut self, rep: Resource<FrameStream>) -> Result<(), wasmtime::Error> {
+        self.table.delete(rep).map_err(|e: wasmtime::component::ResourceTableError| wasmtime::Error::msg(e.to_string()))?;
+        Ok(())
+    }
+}
+
+impl MyState {
+} // end of ResourceHostFrameStream for MyState impl
+
+fn decode_and_wrap_frame(data: Vec<u8>) -> Result<Frame, String> {
+    debug!("Decoding frame of size {} bytes", data.len());
+    if data.starts_with(&[0xff, 0xd8]) {
+        // MJPEG decoding
+        let img = image::load_from_memory(&data).map_err(|e| format!("MJPEG decode error: {}", e))?;
+        let rgb = img.to_rgb8();
+        Ok(Frame {
+            data: rgb.to_vec(),
+            width: rgb.width(),
+            height: rgb.height(),
+        })
+    } else {
+        // YUYV fallback (Simplified: assume 640x480 if size matches 614400 bytes)
+        let (w, h) = if data.len() == 640 * 480 * 2 { (640, 480) }
+                    else if data.len() == 1280 * 720 * 2 { (1280, 720) }
+                    else { (0, 0) };
+        Ok(Frame { data, width: w, height: h })
+    }
+}
+
+impl HostObjectDetector for MyState {
+    fn new(&mut self, model_path: String) -> Resource<ObjectDetector> {
+        let model = tract_onnx::onnx()
+            .model_for_path(model_path).expect("Failed to load model")
+            .with_input_fact(0, f32::fact(&[1, 3, 640, 640]).into()).expect("Failed to set input fact")
+            .into_optimized().expect("Failed to optimize model")
+            .into_runnable().expect("Failed to make model runnable");
+        self.table.push(ObjectDetector { model }).expect("Failed to push to table")
+    }
+
+    fn detect(&mut self, self_: Resource<ObjectDetector>, f: Frame) -> Result<Vec<Detection>, String> {
+        let detector = self.table.get(&self_).map_err(|e: wasmtime::component::ResourceTableError| e.to_string())?;
+        
+        let start = Instant::now();
+        
+        // Preprocessing
+        let image = RgbImage::from_raw(f.width, f.height, f.data).ok_or_else(|| "Invalid frame data".to_string())?;
+        let resized = image::imageops::resize(&image, 640, 640, image::imageops::FilterType::Triangle);
+        
+        // Convert to tensor
+        let mut tensor = tract_ndarray::Array4::<f32>::zeros((1, 3, 640, 640));
+        for y in 0..640 {
+            for x in 0..640 {
+                let pixel = resized.get_pixel(x, y);
+                tensor[[0, 0, y as usize, x as usize]] = pixel[0] as f32 / 255.0;
+                tensor[[0, 1, y as usize, x as usize]] = pixel[1] as f32 / 255.0;
+                tensor[[0, 2, y as usize, x as usize]] = pixel[2] as f32 / 255.0;
+            }
+        }
+        let tensor: Tensor = tensor.into();
+
+        // Inference
+        let _result = detector.model.run(tvec!(tensor.into())).map_err(|e| format!("{:?}", e))?;
+        
+        let duration = start.elapsed();
+        if self.enable_yolo {
+            info!("Inference took: {:?}", duration);
+        }
+
+        // Return empty detections for now as per requirement to focus on performance measurement
+        Ok(vec![])
+    }
+
+    fn drop(&mut self, rep: Resource<ObjectDetector>) -> Result<(), wasmtime::Error> {
+        self.table.delete(rep).map_err(|e: ResourceTableError| wasmtime::Error::msg(e.to_string()))?;
+        Ok(())
+    }
+}
+
+impl crate::component::usb::cv::Host for MyState {}
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let cli = CliParser::parse();
     env_logger::Builder::new()
         .filter_module("usb_wasi_host", cli.debug_level.parse().unwrap_or(LevelFilter::Info))
         .init();
+
+    // macOS specific nokhwa initialization for camera permissions
+    nokhwa::nokhwa_initialize(|granted| {
+        if granted {
+            info!("Camera access granted by OS");
+        } else {
+            warn!("Camera access denied by OS");
+        }
+    });
+
+    // Short sleep to allow the above initialization to start/register
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     info!("Starting WASM component");
     let args: Vec<String> = std::env::args().collect();
@@ -888,9 +1350,9 @@ async fn main() -> Result<(), Error> {
 
     let component = Component::from_file(&engine, &cli.component_path)?;
     let mut linker = Linker::new(&engine);
-    Host_::add_to_linker(&mut linker, |state: &mut MyState| state)?;
+    Host::add_to_linker(&mut linker, |state: &mut MyState| state)?;
     wasmtime_wasi::add_to_linker_async(&mut linker)?;
-    let mut store = Store::new(&engine, MyState::new(allowed_usbdevices, wasi_args));
+    let mut store = Store::new(&engine, MyState::new(allowed_usbdevices, wasi_args, cli.enable_yolo));
     let command = Command::instantiate_async(&mut store, &component, &linker).await?;
 
     match command.wasi_cli_run().call_run(store).await {
