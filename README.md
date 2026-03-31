@@ -1,19 +1,17 @@
 # WASI USB
 
-A proposed [WebAssembly System Interface](https://github.com/WebAssembly/WASI) API.
+A proposed [WebAssembly System Interface](https://github.com/WebAssembly/WASI) API for USB hardware access.
 
 ### Current Phase
 
 WASI USB is currently in Phase 2.
 
-### Champions
+### Contributors & Champions
 
-<!---
-Please limit to one champion per company or organization
--->
-- Merlijn Sebrechts
-- Michiel Van Kenhove
-- Friedrich Vandenberghe
+- **Merlijn Sebrechts** (Champion)
+- **Michiel Van Kenhove**
+- **Friedrich Vandenberghe**
+- **Sibren Wieme** (IDLab Discover - CV/YOLO Extensions)
 
 ### Portability Criteria
 

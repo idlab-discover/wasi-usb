@@ -1,0 +1,5 @@
+# Host Specific Build Artifacts
+build_release/
+frame.png
+frame_raw.jpg
+yolov8n.onnx

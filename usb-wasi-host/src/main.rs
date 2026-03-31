@@ -1,3 +1,13 @@
+// Copyright (c) 2026 IDLab Discover
+// SPDX-License-Identifier: MIT
+
+//! WASI-USB Host Runtime
+//!
+//! This crate implements the host-side of the WASI-USB interface, providing
+//! WebAssembly modules with safe, capability-based access to USB devices.
+//! It handles WIT-to-native mapping, USB transfer orchestration, and 
+//! specialized interfaces for Computer Vision (UVC/YOLO).
+
 use libusb1_sys::constants::{
     LIBUSB_TRANSFER_COMPLETED, LIBUSB_TRANSFER_TYPE_BULK, LIBUSB_TRANSFER_TYPE_CONTROL,
     LIBUSB_TRANSFER_TYPE_INTERRUPT, LIBUSB_TRANSFER_TYPE_ISOCHRONOUS,
@@ -41,6 +51,7 @@ use crate::component::usb::device::{
 use crate::component::usb::cv::{
     Frame, Detection, HostFrameStream, HostObjectDetector,
 };
+use crate::component::usb::cv_ui::{HostRenderer};
 use crate::component::usb::errors::LibusbError;
 use crate::component::usb::transfers::{
     HostTransfer, IsoResult, IsoPacket, IsoPacketStatus,
@@ -73,13 +84,14 @@ pub struct WebcamFrameStream {
 }
 
 pub enum FrameStream {
-    Nokhwa(Camera),
     Uvc(WebcamFrameStream),
 }
 
 pub struct ObjectDetector {
     pub model: SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>,
 }
+
+pub struct RendererStub;
 
 #[derive(Debug)]
 pub struct UsbTransfer {
@@ -103,6 +115,7 @@ mod bindings {
             "component:usb/device@0.2.1/device-handle": super::UsbDeviceHandle,
             "component:usb/cv@0.2.1/frame-stream": super::FrameStream,
             "component:usb/cv@0.2.1/object-detector": super::ObjectDetector,
+            "component:usb/cv-ui@0.2.1/renderer": super::RendererStub,
         },
         async: {
             only_imports: ["await-transfer", "await-iso-transfer"]
@@ -992,6 +1005,21 @@ fn parse_payload_header(data: &[u8]) -> (usize, bool) {
     (header_len, end_of_frame)
 }
 
+impl crate::bindings::component::usb::cv_ui::Host for MyState {}
+impl HostRenderer for MyState {
+    fn new(&mut self, _title: String) -> Resource<RendererStub> {
+        self.table.push(RendererStub).unwrap()
+    }
+    fn render(&mut self, _self_: Resource<RendererStub>, _f: Frame, detections: Vec<Detection>) -> () {
+        if !detections.is_empty() {
+            println!("Detections: {:?}", detections);
+        }
+    }
+    fn drop(&mut self, rep: Resource<RendererStub>) -> wasmtime::Result<()> {
+        let _ = self.table.delete(rep); Ok(())
+    }
+}
+
 impl HostFrameStream for MyState {
     fn new(&mut self, index: u32) -> Resource<FrameStream> {
         info!("Creating FrameStream for camera index {}", index);
@@ -1085,45 +1113,15 @@ impl HostFrameStream for MyState {
             }
         }
 
-        // 2. Fallback to Nokhwa (for Integrated cameras or if USB failed)
-        warn!("USB UVC failed or not found. Falling back to Nokhwa for index {}", index);
-        let nokhwa_index = nokhwa::utils::CameraIndex::Index(index);
-        let formats = vec![
-            RequestedFormat::new::<RgbFormat>(RequestedFormatType::Exact(nokhwa::utils::CameraFormat::new(nokhwa::utils::Resolution::new(1280, 720), nokhwa::utils::FrameFormat::MJPEG, 30))),
-            RequestedFormat::new::<RgbFormat>(RequestedFormatType::Exact(nokhwa::utils::CameraFormat::new(nokhwa::utils::Resolution::new(640, 480), nokhwa::utils::FrameFormat::MJPEG, 30))),
-            RequestedFormat::new::<RgbFormat>(RequestedFormatType::None),
-        ];
-
-        let mut camera = None;
-        for request in formats {
-            match Camera::new(nokhwa_index.clone(), request) {
-                Ok(mut cam) => {
-                    if cam.open_stream().is_ok() {
-                        camera = Some(cam);
-                        break;
-                    }
-                }
-                Err(_) => continue,
-            }
-        }
-
-        let camera = camera.expect("Failed to open any camera stream — check permissions or indices");
-        self.table.push(FrameStream::Nokhwa(camera)).expect("Failed to push to table")
+        // 2. No fallback — strictly UVC
+        error!("USB UVC failed or not found. Nokhwa fallback disabled as requested.");
+        panic!("Failed to open USB UVC stream — check permissions or device availability");
     }
 
     fn read_frame(&mut self, self_: Resource<FrameStream>) -> Result<Frame, String> {
         let stream = self.table.get_mut(&self_).map_err(|e: ResourceTableError| e.to_string())?;
         
         match stream {
-            FrameStream::Nokhwa(camera) => {
-                let frame = camera.frame().map_err(|e| e.to_string())?;
-                let rgb = frame.decode_image::<RgbFormat>().map_err(|e| e.to_string())?;
-                Ok(Frame {
-                    data: rgb.to_vec(),
-                    width: rgb.width(),
-                    height: rgb.height(),
-                })
-            }
             FrameStream::Uvc(ref mut uvc) => {
                 let timeout_ms = 2000;
                 let mut attempts = 0;

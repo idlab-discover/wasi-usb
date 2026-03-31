@@ -7,33 +7,10 @@ world host {
     import descriptors;
     import configuration;
     import usb-hotplug;
-    import cv;
 
-    export transfers;
-    export errors;
-    export device;
-    export descriptors;
-    export configuration;
-    export usb-hotplug;
-    export cv;
-}
+    import cv; // Host provides camera frames
+    import cv-ui; // Host provides rendering (this is new for dashboard)
 
-world guest {
-    import transfers;
-    import errors;
-    import device;
-    import descriptors;
-    import configuration;
-    import usb-hotplug;
-}
-
-world cguest {
-    import transfers;
-    import errors;
-    import device;
-    import descriptors;
-    import configuration;
-    import usb-hotplug;
-
-    export wasi:cli/run@0.2.5;
+    // The component might export something if we want to call it
+    // export cv; 
 }

@@ -18,6 +18,12 @@ interface cv {
     }
 }
 
-world cv-world {
-    export cv;
+
+interface cv-ui {
+    use cv.{frame, detection};
+
+    resource renderer {
+        constructor(title: string);
+        render: func(f: frame, detections: list<detection>);
+    }
 }
