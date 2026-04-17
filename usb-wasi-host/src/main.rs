@@ -51,7 +51,6 @@ use crate::component::usb::device::{
 use crate::component::usb::cv::{
     Frame, Detection, HostFrameStream, HostObjectDetector,
 };
-use crate::component::usb::cv_ui::{HostRenderer};
 use crate::component::usb::errors::LibusbError;
 use crate::component::usb::transfers::{
     HostTransfer, IsoResult, IsoPacket, IsoPacketStatus,
@@ -91,8 +90,6 @@ pub struct ObjectDetector {
     pub model: SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>,
 }
 
-pub struct RendererStub;
-
 #[derive(Debug)]
 pub struct UsbTransfer {
     transfer: *mut libusb_transfer,
@@ -115,7 +112,6 @@ mod bindings {
             "component:usb/device@0.2.1/device-handle": super::UsbDeviceHandle,
             "component:usb/cv@0.2.1/frame-stream": super::FrameStream,
             "component:usb/cv@0.2.1/object-detector": super::ObjectDetector,
-            "component:usb/cv-ui@0.2.1/renderer": super::RendererStub,
         },
         async: {
             only_imports: ["await-transfer", "await-iso-transfer"]
@@ -1003,21 +999,6 @@ fn parse_payload_header(data: &[u8]) -> (usize, bool) {
     }
     let end_of_frame = (data[1] & 0x02) != 0;
     (header_len, end_of_frame)
-}
-
-impl crate::bindings::component::usb::cv_ui::Host for MyState {}
-impl HostRenderer for MyState {
-    fn new(&mut self, _title: String) -> Resource<RendererStub> {
-        self.table.push(RendererStub).unwrap()
-    }
-    fn render(&mut self, _self_: Resource<RendererStub>, _f: Frame, detections: Vec<Detection>) -> () {
-        if !detections.is_empty() {
-            println!("Detections: {:?}", detections);
-        }
-    }
-    fn drop(&mut self, rep: Resource<RendererStub>) -> wasmtime::Result<()> {
-        let _ = self.table.delete(rep); Ok(())
-    }
 }
 
 impl HostFrameStream for MyState {
