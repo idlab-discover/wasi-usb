@@ -7,10 +7,4 @@ world host {
     import descriptors;
     import configuration;
     import usb-hotplug;
-
-    import cv; // Host provides camera frames
-    import cv-ui; // Host provides rendering (this is new for dashboard)
-
-    // The component might export something if we want to call it
-    // export cv; 
 }
