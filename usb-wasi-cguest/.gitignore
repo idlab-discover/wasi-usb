@@ -2,3 +2,11 @@
 helper/
 out/
 cmake-build-debug/
+
+# ── Debug Logs & Artifacts ───────────────────────────────────────────────────
+*.log
+*.csv
+*.out
+perf.data*
+flamegraph.svg
+build_errors*.txt
