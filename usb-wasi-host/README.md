@@ -1,29 +1,27 @@
 # usb-wasi-host
 
-This directory contains the **WASI-USB Host Runtime**, a specialized Wasmtime-based runner that provides WebAssembly components with safe, capability-based access to USB hardware.
+This directory contains the **WASI-USB Host Runtime** — a Wasmtime-based runner that provides WebAssembly components with safe, capability-based access to USB hardware.
+
+Architecture: **dumb host, smart guest**. The host exposes only generic USB primitives (control/bulk/interrupt/isochronous transfers, device enumeration, hotplug). All protocol-specific logic (UVC, MJPEG reassembly, etc.) lives in the guest component.
 
 ## Key Features
 
-- **WASI-USB Interface**: Implements full control, bulk, interrupt, and isochronous transfer support.
-- **Computer Vision Acceleration**: Provides optimized host-side UVC streaming and YOLOv8 inference resources to bypass the overhead of raw MJPEG/RGB processing in the Wasm sandbox.
+- **WASI-USB Interface**: Full control, bulk, interrupt, and isochronous transfer support including USB 3.0 Bulk Streams.
 - **Capability-Based Security**: Strictly enforces device allow-lists/deny-lists for guest components.
-- **Async Execution**: Fully utilizes Wasmtime 31.0.0 async component model for non-blocking I/O.
+- **Async Execution**: Fully utilises Wasmtime 31.0.0 async component model for non-blocking I/O.
+- **Canonical WIT**: Implements `component:usb@0.2.1` as defined in `../wit/` (mirror of the canonical version).
 
 ## Building
-
-A release version of the runtime can be built by running the following command in this folder:
 
 ```bash
 cargo build --release
 ```
 
-The resulting binary will be located at `../../target/release/usb-wasi-host`.
+The resulting binary will be located at `target/release/usb-wasi-host` (relative to `wasi-usb/`).
 
 ## Usage
 
-The host runtime accepts a path to a compiled WASM component and various configuration flags.
-
-```bash
+```
 Usage: usb-wasi-host [OPTIONS] --component-path <COMPONENT_PATH>
 
 Options:
@@ -31,32 +29,27 @@ Options:
   -d, --usb-devices <USB_DEVICES>        USB devices (format VID:PID) to allow or deny
   -u, --use-allow-list                   Treat the -d list as an allow-list (default is deny)
   -l, --debug_level <DEBUG_LEVEL>        Log level (trace, debug, info, warn, error) [default: info]
-      --enable-yolo                      Enable YOLOv8 inference acceleration and timing logs
   -h, --help                             Print help
 ```
 
 ### Examples
 
-#### 1. List USB Devices (lsusb)
+#### List USB Devices (lsusb)
 ```bash
-sudo ../../target/release/usb-wasi-host \
-    --component-path ../../usb-wasm/out/lsusb.wasm
+sudo target/release/usb-wasi-host \
+    --component-path ../usb-wasm/out/lsusb.wasm
 ```
 
-#### 2. Real-time YOLOv8 Inference (Terminal Only)
-The YOLO demo uses a pre-composed component that links the webcam-cv source and the detector sink.
-
+#### Webcam Demo (UVC capture)
 ```bash
-sudo ../../target/release/usb-wasi-host \
-    --component-path ../../usb-wasm/out/yolo-terminal-composed.wasm \
-    --enable-yolo -- yolov8n.onnx
+sudo target/release/usb-wasi-host \
+    --component-path ../usb-wasm/out/webcam.wasm
 ```
 
-> [!NOTE]
-> `sudo` is required on Linux/macOS to allow the host to claim physical USB interfaces unless appropriate `udev` rules are configured.
+> **Note**: `sudo` is required on Linux/macOS to claim physical USB interfaces unless appropriate `udev` rules are configured.
 
 ## Project Structure
 
-- `src/main.rs`: Entry point, CLI parsing, and WASI interface implementations.
+- `src/main.rs`: Entry point, CLI parsing, and all WIT interface implementations.
 - `src/usb_backend.rs`: OS-specific USB logic (via `libusb`).
-- `../wit/`: Interface definitions (WIT) shared between host and guest.
+- `../wit/`: WIT definitions — exact mirror of the canonical `component:usb@0.2.1` package in `wasi-usb/wit/`.
