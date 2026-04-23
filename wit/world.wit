@@ -1,5 +1,7 @@
 package component:usb@0.2.1;
 
+/// Host world — implemented by the usb-wasi-host binary.
+/// The host provides all USB primitives; no UVC, MJPEG, or ML lives here.
 world host {
     import transfers;
     import errors;
@@ -7,4 +9,57 @@ world host {
     import descriptors;
     import configuration;
     import usb-hotplug;
+}
+
+/// C-guest world — used by libusb-wasi C benchmark components.
+/// Exports wasi:cli/run so the component can be invoked as a command.
+world cguest {
+    import transfers;
+    import errors;
+    import device;
+    import descriptors;
+    import configuration;
+    import usb-hotplug;
+
+    export wasi:cli/run@0.2.5;
+}
+
+/// Rust command-guest world — used by simple Rust example guests.
+/// Imports all USB interfaces + WASI CLI; exports wasi:cli/run.
+world guest {
+    import transfers;
+    import errors;
+    import device;
+    import descriptors;
+    import configuration;
+    import usb-hotplug;
+
+    import wasi:cli/environment@0.2.5;
+    import wasi:cli/exit@0.2.5;
+    import wasi:cli/stderr@0.2.5;
+    import wasi:cli/stdin@0.2.5;
+    import wasi:cli/stdout@0.2.5;
+
+    export wasi:cli/run@0.2.5;
+}
+
+/// Webcam guest world — used by the webcam Rust component.
+/// A standalone command that captures UVC frames and writes JPEG to disk.
+world webcam-guest {
+    import transfers;
+    import errors;
+    import device;
+    import descriptors;
+    import configuration;
+    import usb-hotplug;
+
+    import wasi:cli/environment@0.2.5;
+    import wasi:cli/exit@0.2.5;
+    import wasi:cli/stderr@0.2.5;
+    import wasi:cli/stdin@0.2.5;
+    import wasi:cli/stdout@0.2.5;
+    import wasi:filesystem/types@0.2.5;
+    import wasi:filesystem/preopens@0.2.5;
+
+    export wasi:cli/run@0.2.5;
 }

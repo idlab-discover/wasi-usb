@@ -1,0 +1,17 @@
+[package]
+name = "ps5-maze"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+byteorder = "1.5.0"
+colored = "2.0.4"
+anyhow = "1"
+wit-bindgen = "0.41.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "ps5-maze"
+path = "src/main.rs"
