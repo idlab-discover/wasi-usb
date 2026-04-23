@@ -11,7 +11,7 @@ WASI USB is currently in Phase 2.
 - **Merlijn Sebrechts** (Champion)
 - **Michiel Van Kenhove**
 - **Friedrich Vandenberghe**
-- **Sibren Wieme** (IDLab Discover - CV/YOLO Extensions)
+- **Sibren Wieme** (IDLab Discover - host implementation, benchmarking)
 
 ### Portability Criteria
 

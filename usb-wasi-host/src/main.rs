@@ -865,8 +865,8 @@ impl crate::component::usb::usb_hotplug::Host for MyState {
     }
 }
 
-// ── (CV/YOLO host-side code removed) ─────────────────────────────────────────
-// UVC handshake, frame reassembly, and YOLO inference are guest concerns.
+// ── Hotplug ───────────────────────────────────────────────────────────────────
+// UVC handshake, frame reassembly, and protocol-specific logic are guest concerns.
 // The host provides only generic USB primitives (dumb-host / smart-guest).
 
 // ── Hotplug ───────────────────────────────────────────────────────────────────
