@@ -151,12 +151,6 @@ fn open_uvc_stream(index: u32) -> Result<WebcamFrameStream> {
     };
 
     // Helper: do a control transfer and return the data portion only.
-    //
-    // NB. The host prepends (and returns) an 8-byte USB control setup packet
-    // in every control transfer's buffer. For reads we strip those 8 bytes.
-    // For writes we must prepend a matching setup packet ourselves, because
-    // the host's `submit_transfer` replaces the entire buffer with what the
-    // guest provides (clobbering the setup prefix it built in `new_transfer`).
     let ctrl = |h: &DeviceHandle,
                 setup: TransferSetup,
                 payload: &[u8],
@@ -166,21 +160,15 @@ fn open_uvc_stream(index: u32) -> Result<WebcamFrameStream> {
             .new_transfer(TransferType::Control, setup.clone(), payload_len, no_timeout.clone())
             .map_err(|e| anyhow::anyhow!("{:?}", e))?;
 
-        // For OUT transfers: pass the raw payload only. The host pre-allocates
-        // an 8-byte setup prefix in new_transfer and copies our data starting
-        // at offset 8 — we must NOT include the prefix ourselves.
-        // For IN transfers: pass an empty slice; the host fills the buffer and
-        // returns the full contents (setup prefix + data); we strip the prefix below.
+        // The wasi-usb host manages the 8-byte USB setup packet internally in
+        // new_transfer and strips it from IN responses. Guests pass and receive
+        // raw payload bytes on both directions.
         let submit_buf: Vec<u8> = payload.to_vec();
 
         xfer.submit_transfer(&submit_buf)
             .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-        let mut result = await_transfer(&xfer).map_err(|e| anyhow::anyhow!("{:?}", e))?;
+        let result = await_transfer(&xfer).map_err(|e| anyhow::anyhow!("{:?}", e))?;
 
-        // Strip the 8-byte setup prefix from the returned buffer.
-        if result.data.len() >= 8 {
-            result.data.drain(..8);
-        }
         Ok(result.data)
     };
 
