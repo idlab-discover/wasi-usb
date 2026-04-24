@@ -5,7 +5,6 @@
 HOST := "./usb-wasi-host/target/release/usb-wasi-host"
 GUEST_TARGET := "wasm32-wasip2"
 GUEST_OUT := "usb-wasi-guest/target/wasm32-wasip2/release/examples"
-SUB_OUT := "usb-wasi-guest/target/wasm32-wasip2/release"
 
 # ── Host ────────────────────────────────────────────────────────────────────
 
@@ -18,7 +17,7 @@ build-webcam:
     mkdir -p out
     cargo build --target {{GUEST_TARGET}} --release -p webcam \
         --manifest-path usb-wasi-guest/examples/webcam/Cargo.toml
-    cp {{SUB_OUT}}/webcam.wasm out/webcam.wasm
+    cp usb-wasi-guest/examples/webcam/target/wasm32-wasip2/release/webcam.wasm out/webcam.wasm
 
 webcam: build-host build-webcam
     mkdir -p out
@@ -61,7 +60,7 @@ build-mass-storage:
     mkdir -p out
     cargo build --target {{GUEST_TARGET}} --release -p mass-storage \
         --manifest-path usb-wasi-guest/examples/mass-storage/Cargo.toml
-    cp {{SUB_OUT}}/mass-storage.wasm out/mass-storage.wasm
+    cp usb-wasi-guest/examples/mass-storage/target/wasm32-wasip2/release/mass-storage.wasm out/mass-storage.wasm
 
 mass-storage *args: build-host build-mass-storage
     sudo {{HOST}} -c out/mass-storage.wasm -- {{args}}
@@ -70,7 +69,7 @@ build-ps5-maze:
     mkdir -p out
     cargo build --target {{GUEST_TARGET}} --release -p ps5-maze \
         --manifest-path usb-wasi-guest/examples/ps5-maze/Cargo.toml
-    cp {{SUB_OUT}}/ps5_maze.wasm out/ps5-maze.wasm
+    cp usb-wasi-guest/examples/ps5-maze/target/wasm32-wasip2/release/ps5_maze.wasm out/ps5-maze.wasm
 
 ps5-maze: build-host build-ps5-maze
     sudo {{HOST}} -c out/ps5-maze.wasm
@@ -79,7 +78,7 @@ build-xbox-maze:
     mkdir -p out
     cargo build --target {{GUEST_TARGET}} --release -p xbox-maze \
         --manifest-path usb-wasi-guest/examples/xbox-maze/Cargo.toml
-    cp {{SUB_OUT}}/xbox_maze.wasm out/xbox-maze.wasm
+    cp usb-wasi-guest/examples/xbox-maze/target/wasm32-wasip2/release/xbox_maze.wasm out/xbox-maze.wasm
 
 xbox-maze: build-host build-xbox-maze
     sudo {{HOST}} -c out/xbox-maze.wasm
