@@ -30,7 +30,7 @@ const UVC_VS_COMMIT_CONTROL: u16 = 0x0200;
 const UVC_GET_CUR: u8 = 0x81;
 const UVC_SET_CUR: u8 = 0x01;
 /// Minimum bytes for a valid frame (≈ 120×80×2 px YUYV)
-const MIN_FRAME_BYTES: usize = 28_800;
+const MIN_FRAME_BYTES: usize = 2_000;
 
 // ─── WebcamFrameStream ────────────────────────────────────────────────────────
 
@@ -332,6 +332,8 @@ impl WebcamFrameStream {
                             width: w,
                             height: h,
                         });
+                    } else {
+                        eprintln!("[webcam] dropped short frame ({} bytes) on FID toggle", complete.len());
                     }
                 } else {
                     if !st.frame_started && !payload.is_empty() {
@@ -353,6 +355,8 @@ impl WebcamFrameStream {
                                 width: w,
                                 height: h,
                             });
+                        } else {
+                            eprintln!("[webcam] dropped short frame ({} bytes) on EOF", complete.len());
                         }
                     } else {
                         st.last_fid = fid;
