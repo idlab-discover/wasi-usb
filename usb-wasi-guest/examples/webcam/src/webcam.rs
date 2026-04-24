@@ -29,8 +29,12 @@ const UVC_VS_PROBE_CONTROL: u16 = 0x0100;
 const UVC_VS_COMMIT_CONTROL: u16 = 0x0200;
 const UVC_GET_CUR: u8 = 0x81;
 const UVC_SET_CUR: u8 = 0x01;
-/// Minimum bytes for a valid frame (≈ 120×80×2 px YUYV)
-const MIN_FRAME_BYTES: usize = 2_000;
+/// Returns true if `data` is a complete JPEG (starts with SOI, ends with EOI).
+fn is_complete_jpeg(data: &[u8]) -> bool {
+    data.len() >= 4
+        && data[0] == 0xFF && data[1] == 0xD8        // SOI
+        && data[data.len() - 2] == 0xFF && data[data.len() - 1] == 0xD9 // EOI
+}
 
 // ─── WebcamFrameStream ────────────────────────────────────────────────────────
 
@@ -325,7 +329,7 @@ impl WebcamFrameStream {
                     st.frame_started = true;
                     drop(st); // release borrow before returning
 
-                    if complete.len() >= MIN_FRAME_BYTES {
+                    if is_complete_jpeg(&complete) {
                         let (w, h) = guess_resolution(complete.len(), self.actual_frame_size);
                         return Ok(RawFrame {
                             data: complete,
@@ -333,7 +337,7 @@ impl WebcamFrameStream {
                             height: h,
                         });
                     } else {
-                        eprintln!("[webcam] dropped short frame ({} bytes) on FID toggle", complete.len());
+                        eprintln!("[webcam] dropped incomplete frame ({} bytes) on FID toggle", complete.len());
                     }
                 } else {
                     if !st.frame_started && !payload.is_empty() {
@@ -348,7 +352,7 @@ impl WebcamFrameStream {
                         st.last_fid = fid;
                         drop(st);
 
-                        if complete.len() >= MIN_FRAME_BYTES {
+                        if is_complete_jpeg(&complete) {
                             let (w, h) = guess_resolution(complete.len(), self.actual_frame_size);
                             return Ok(RawFrame {
                                 data: complete,
@@ -356,7 +360,7 @@ impl WebcamFrameStream {
                                 height: h,
                             });
                         } else {
-                            eprintln!("[webcam] dropped short frame ({} bytes) on EOF", complete.len());
+                            eprintln!("[webcam] dropped incomplete frame ({} bytes) on EOF", complete.len());
                         }
                     } else {
                         st.last_fid = fid;
