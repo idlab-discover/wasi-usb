@@ -7,7 +7,7 @@ pub mod webcam;
 pub mod bindings {
     wit_bindgen::generate!({
         world: "webcam-guest",
-        path: "../../wit",
+        path: "../../../wit",
         pub_export_macro: true,
         generate_all,
     });
