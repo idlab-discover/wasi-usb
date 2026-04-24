@@ -2,6 +2,7 @@ use wit_bindgen::generate;
 generate!({
     world: "guest",
     path: "../wit",
+    generate_all,
 });
 
 use component::usb::{
@@ -49,7 +50,7 @@ fn main() {
         .expect("alloc xfer_in");
     xfer_in.submit_transfer(&[]).expect("submit in");
 
-    let in_data = transfers::await_transfer(xfer_in).expect("await in");
+    let in_data = transfers::await_transfer(&xfer_in).expect("await in").data;
     println!("Received {} bytes: {:?}", in_data.len(), in_data);
 
     handle.release_interface(0).expect("release_interface");

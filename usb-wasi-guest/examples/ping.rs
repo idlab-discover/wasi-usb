@@ -1,7 +1,7 @@
 /// USB ping — sends a vendor-specific OUT transfer and waits for the IN echo.
 /// Usage: ping <vid_hex> <pid_hex> <ep_out_hex> <ep_in_hex> [payload_bytes]
 use wit_bindgen::generate;
-generate!({ world: "guest", path: "../wit" });
+generate!({ world: "guest", path: "../wit", generate_all });
 
 use component::usb::device::list_devices;
 use component::usb::transfers::{await_transfer, TransferOptions, TransferSetup, TransferType};

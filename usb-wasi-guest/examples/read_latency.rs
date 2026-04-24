@@ -18,7 +18,7 @@ use tokio::time::timeout;
 generate!({
     world: "guest",
     path: "../wit",
-    
+    generate_all,
 });
 
 // Custom IoSlice to restrict reads to a partition
@@ -155,7 +155,7 @@ impl UsbMassStorage {
         trace!("Submitting reset transfer");
         xfer.submit_transfer(&[])?;
         trace!("Waiting for reset transfer completion");
-        component::usb::transfers::await_transfer(xfer)?;
+        component::usb::transfers::await_transfer(&xfer)?;
         debug!("USB mass storage reset successful");
         Ok(true)
     }
@@ -239,7 +239,7 @@ impl UsbMassStorage {
         trace!("Submitting CBW transfer");
         xfer.submit_transfer(&cbw)?;
         trace!("Waiting for CBW transfer completion");
-        component::usb::transfers::await_transfer(xfer)?;
+        component::usb::transfers::await_transfer(&xfer)?;
         trace!("CBW transfer completed");
 
         if let Some(data) = data {
@@ -256,7 +256,7 @@ impl UsbMassStorage {
                 opts,
             )?;
             xfer.submit_transfer(data)?;
-            component::usb::transfers::await_transfer(xfer)?;
+            component::usb::transfers::await_transfer(&xfer)?;
             trace!("Data transfer completed");
         }
 
@@ -291,7 +291,7 @@ impl UsbMassStorage {
         trace!("Submitting CSW receive transfer");
         xfer.submit_transfer(&[])?;
         trace!("Waiting for CSW data");
-        let data = component::usb::transfers::await_transfer(xfer)?;
+        let data = component::usb::transfers::await_transfer(&xfer)?.data;
         trace!("Received {} bytes for CSW", data.len());
 
         if data.len() < 13 {
@@ -366,7 +366,7 @@ impl UsbMassStorage {
         trace!("Submitting CBW transfer");
         xfer.submit_transfer(&cbw)?;
         trace!("Waiting for CBW transfer completion");
-        component::usb::transfers::await_transfer(xfer)?;
+        component::usb::transfers::await_transfer(&xfer)?;
         trace!("CBW transfer completed");
 
         trace!("Setting up data IN transfer from endpoint 0x{:02x}, expecting {} bytes",
@@ -392,7 +392,7 @@ impl UsbMassStorage {
         trace!("Submitting data IN transfer");
         xfer.submit_transfer(&[])?;
         trace!("Waiting for data");
-        let received_data = component::usb::transfers::await_transfer(xfer)?;
+        let received_data = component::usb::transfers::await_transfer(&xfer)?.data;
         trace!("Received {} bytes of data", received_data.len());
 
         if received_data.len() < data_length as usize {
@@ -517,7 +517,7 @@ fn control_in(
     };
     let xfer = handle.new_transfer(TransferType::Control, setup, len as u32, opts)?;
     xfer.submit_transfer(&[])?;
-    component::usb::transfers::await_transfer(xfer)
+    component::usb::transfers::await_transfer(&xfer).map(|r| r.data)
 }
 
 fn main() {

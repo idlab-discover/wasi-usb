@@ -1,6 +1,6 @@
 /// Xbox One S controller reader — polls interrupt-IN endpoint and renders button state.
 use wit_bindgen::generate;
-generate!({ world: "guest", path: "../wit" });
+generate!({ world: "guest", path: "../wit", generate_all });
 
 use component::usb::device::list_devices;
 use component::usb::transfers::{await_transfer, TransferOptions, TransferSetup, TransferType};

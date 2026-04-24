@@ -2,6 +2,7 @@ use wit_bindgen::generate;
 generate!({
     world: "guest",
     path: "../wit",
+    generate_all,
 });
 
 use component::usb::{
@@ -42,7 +43,7 @@ fn main() {
         .expect("new_transfer");
     xfer.submit_transfer(&[]).expect("submit_transfer");
 
-    let buf = transfers::await_transfer(xfer).expect("await_transfer");
+    let buf = transfers::await_transfer(&xfer).expect("await_transfer").data;
     println!("Isochronous total bytes: {}", buf.len());
 
     handle.release_interface(2).expect("release_interface");

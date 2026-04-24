@@ -2,6 +2,7 @@ use wit_bindgen::generate;
 generate!({
     world: "guest",
     path: "../wit",
+    generate_all,
 });
 
 use component::usb::{
@@ -37,8 +38,8 @@ fn main() {
     xfer1.submit_transfer(&[]).expect("submit xfer1");
 
     // now await both results
-    let buf0 = transfers::await_transfer(xfer0).expect("await xfer0");
-    let buf1 = transfers::await_transfer(xfer1).expect("await xfer1");
+    let buf0 = transfers::await_transfer(&xfer0).expect("await xfer0").data;
+    let buf1 = transfers::await_transfer(&xfer1).expect("await xfer1").data;
 
     println!("Config[0] descriptor bytes: {:?}", buf0);
     println!("Config[1] descriptor bytes: {:?}", buf1);

@@ -11,7 +11,7 @@ use mass_storage::MassStorageDevice;
 use rand::{Fill, Rng};
 use tracing::{debug, info};
 
-wit_bindgen::generate!({ world: "guest", path: "../../../wit" });
+wit_bindgen::generate!({ world: "guest", path: "../../../wit", generate_all });
 
 use component::usb::device::{list_devices, UsbDevice};
 

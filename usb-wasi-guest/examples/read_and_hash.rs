@@ -21,6 +21,7 @@ use std::{fmt, thread};
 generate!({
     world: "guest",
     path: "../wit",
+    generate_all,
 });
 
 // Custom IoSlice to restrict reads to a partition
@@ -165,7 +166,7 @@ impl UsbMassStorage {
         xfer.submit_transfer(&[])?;
 
         trace!("Waiting for reset transfer completion");
-        await_transfer(xfer)?;
+        await_transfer(&xfer)?;
 
         debug!("USB mass storage reset successful");
         Ok(true)
@@ -255,7 +256,7 @@ impl UsbMassStorage {
         trace!("Submitting CBW transfer");
         xfer.submit_transfer(&cbw)?;
         trace!("Waiting for CBW transfer completion");
-        await_transfer(xfer)?;
+        await_transfer(&xfer)?;
         trace!("CBW transfer completed");
 
         // Send data if provided
@@ -273,7 +274,7 @@ impl UsbMassStorage {
                 opts,
             )?;
             xfer.submit_transfer(data)?;
-            await_transfer(xfer)?;
+            await_transfer(&xfer)?;
             trace!("Data transfer completed");
         }
 
@@ -310,7 +311,7 @@ impl UsbMassStorage {
         trace!("Submitting CSW receive transfer");
         xfer.submit_transfer(&[])?;
         trace!("Waiting for CSW data");
-        let data = await_transfer(xfer)?;
+        let data = await_transfer(&xfer)?.data;
         trace!("Received {} bytes for CSW", data.len());
 
         if data.len() < 13 {
@@ -387,7 +388,7 @@ impl UsbMassStorage {
         trace!("Submitting CBW transfer");
         xfer.submit_transfer(&cbw)?;
         trace!("Waiting for CBW transfer completion");
-        await_transfer(xfer)?;
+        await_transfer(&xfer)?;
         trace!("CBW transfer completed");
 
         // Receive data
@@ -414,7 +415,7 @@ impl UsbMassStorage {
         trace!("Submitting data IN transfer");
         xfer.submit_transfer(&[])?;
         trace!("Waiting for data");
-        let received_data = await_transfer(xfer)?;
+        let received_data = await_transfer(&xfer)?.data;
         trace!("Received {} bytes of data", received_data.len());
 
         if received_data.len() < data_length as usize {
@@ -558,7 +559,7 @@ fn control_in(
     };
     let xfer = handle.new_transfer(TransferType::Control, setup, len as u32, opts)?;
     xfer.submit_transfer(&[])?;
-    await_transfer(xfer)
+    await_transfer(&xfer).map(|r| r.data)
 }
 
 // NEW: compute SHA-256 for a named file on the exFAT slice

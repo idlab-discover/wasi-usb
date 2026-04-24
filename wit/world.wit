@@ -25,7 +25,8 @@ world cguest {
 }
 
 /// Rust command-guest world — used by simple Rust example guests.
-/// Imports all USB interfaces + WASI CLI; exports wasi:cli/run.
+/// Only imports USB interfaces; WASI CLI (stdin/stdout/run) is provided
+/// automatically by the wasm32-wasip2 toolchain adapter via fn main().
 world guest {
     import transfers;
     import errors;
@@ -33,14 +34,6 @@ world guest {
     import descriptors;
     import configuration;
     import usb-hotplug;
-
-    import wasi:cli/environment@0.2.5;
-    import wasi:cli/exit@0.2.5;
-    import wasi:cli/stderr@0.2.5;
-    import wasi:cli/stdin@0.2.5;
-    import wasi:cli/stdout@0.2.5;
-
-    export wasi:cli/run@0.2.5;
 }
 
 /// Webcam guest world — used by the webcam Rust component.

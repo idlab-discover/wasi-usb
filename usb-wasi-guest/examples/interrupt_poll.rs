@@ -3,7 +3,7 @@ use wit_bindgen::generate;
 generate!({
     world: "guest",
     path: "../wit",
-    
+    generate_all,
 });
 
 use component::usb::{
@@ -48,7 +48,7 @@ fn main() {
             .new_transfer(TransferType::Interrupt, setup, 8, opts)
             .expect("new_transfer");
         xfer.submit_transfer(&[]).expect("submit_transfer");
-        transfers::await_transfer(xfer).expect("await_transfer");
+        transfers::await_transfer(&xfer).expect("await_transfer");
     }
     
     // measure timer overhead (Instant::now() + elapsed())
@@ -69,7 +69,7 @@ fn main() {
             .expect("new_transfer");
         xfer.submit_transfer(&[]).expect("submit_transfer");
         // start timer
-        transfers::await_transfer(xfer).expect("await_transfer");
+        transfers::await_transfer(&xfer).expect("await_transfer");
         // stop timer
         let elapsed = start.elapsed();
         let raw_ns = elapsed.as_nanos() as f64;

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 IDLab Discover
 // SPDX-License-Identifier: MIT
 
-wit_bindgen::generate!({ world: "guest", path: "../../../wit" });
+wit_bindgen::generate!({ world: "guest", path: "../../../wit", generate_all });
 
 use component::usb::transfers::{await_transfer, TransferOptions, TransferSetup, TransferType};
 use component::usb::device::list_devices;

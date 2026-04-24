@@ -5,6 +5,7 @@ use crate::component::usb::device::init;
 generate!({
     world: "guest",
     path: "../wit",
+    generate_all,
 });
 
 fn main() {

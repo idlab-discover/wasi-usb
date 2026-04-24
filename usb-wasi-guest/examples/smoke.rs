@@ -1,9 +1,9 @@
 use wit_bindgen::generate;
-use wit_bindgen::rt::async_support::futures::TryFutureExt;
 
 generate!({
     world: "guest",
     path: "../wit",
+    generate_all,
 });
 
 use component::usb::{
@@ -61,9 +61,9 @@ async fn main() {
         .expect("new_transfer failed");
 
     xfer.submit_transfer(&*Vec::new()).expect("submit failed");
-    match transfers::await_transfer(xfer) {
-        Ok(data) => println!("Device descriptor bytes: {:02X?}", data),
-        Err(e)   => println!("Transfer failed: {:?}", e),
+    match transfers::await_transfer(&xfer) {
+        Ok(result) => println!("Device descriptor bytes: {:02X?}", result.data),
+        Err(e)     => println!("Transfer failed: {:?}", e),
     }
 
     // 6. Release IF 0 and close handle

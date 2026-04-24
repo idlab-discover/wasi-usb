@@ -1,5 +1,5 @@
 use wit_bindgen::generate;
-generate!({ world: "guest", path: "../wit" });
+generate!({ world: "guest", path: "../wit", generate_all });
 
 use component::usb::{
     device,

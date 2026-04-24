@@ -2,6 +2,7 @@ use wit_bindgen::generate;
 generate!({
     world: "guest",
     path: "../wit",
+    generate_all,
 });
 
 use component::usb::{
@@ -38,7 +39,7 @@ fn control_in(
 
     // OUT buffer is empty for IN requests
     xfer.submit_transfer(&[]).expect("submit failed");
-    transfers::await_transfer(xfer)
+    transfers::await_transfer(&xfer).map(|r| r.data)
 }
 
 /// Decode UTF-16LE bytes from a string-descriptor into Rust UTF-8.

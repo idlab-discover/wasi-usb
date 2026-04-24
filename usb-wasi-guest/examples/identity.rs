@@ -1,7 +1,7 @@
 /// Identity — trivial guest that lists USB devices and exits.
 /// (Originally a passthrough for the wac composition pipeline; simplified to a standalone command.)
 use wit_bindgen::generate;
-generate!({ world: "guest", path: "../wit" });
+generate!({ world: "guest", path: "../wit", generate_all });
 
 use component::usb::device::list_devices;
 

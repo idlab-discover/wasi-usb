@@ -9,7 +9,7 @@ use anyhow::anyhow;
 use byteorder::ByteOrder;
 use colored::Colorize;
 
-wit_bindgen::generate!({ world: "guest", path: "../../../wit" });
+wit_bindgen::generate!({ world: "guest", path: "../../../wit", generate_all });
 
 use component::usb::configuration::ConfigValue;
 use component::usb::device::{list_devices, UsbDevice};

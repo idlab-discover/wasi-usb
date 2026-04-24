@@ -9,7 +9,7 @@
 // Gebruik:
 //   streams-test <vid_hex> <pid_hex> <iface> <ep_out_hex> <ep_in_hex> [num_streams] [payload_bytes]
 use wit_bindgen::generate;
-generate!({ world: "guest", path: "../wit" });
+generate!({ world: "guest", path: "../wit", generate_all });
 
 use component::usb::configuration::ConfigValue;
 use component::usb::device::{list_devices, UsbSpeed};

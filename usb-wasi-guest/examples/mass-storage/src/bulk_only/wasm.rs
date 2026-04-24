@@ -4,10 +4,10 @@ use thiserror::Error;
 
 use tracing::trace;
 
-use component::usb::configuration::ConfigValue;
-use component::usb::descriptors::{ConfigurationDescriptor, InterfaceDescriptor};
-use component::usb::device::{DeviceHandle, UsbDevice};
-use component::usb::transfers::{await_transfer, TransferOptions, TransferSetup, TransferType};
+use crate::component::usb::configuration::ConfigValue;
+use crate::component::usb::descriptors::{ConfigurationDescriptor, InterfaceDescriptor};
+use crate::component::usb::device::{DeviceHandle, UsbDevice};
+use crate::component::usb::transfers::{await_transfer, TransferOptions, TransferSetup, TransferType};
 
 #[derive(Debug, Error)]
 pub enum BulkOnlyTransportError {
