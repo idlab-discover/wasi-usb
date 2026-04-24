@@ -166,22 +166,12 @@ fn open_uvc_stream(index: u32) -> Result<WebcamFrameStream> {
             .new_transfer(TransferType::Control, setup.clone(), payload_len, no_timeout.clone())
             .map_err(|e| anyhow::anyhow!("{:?}", e))?;
 
-        // Build buffer = [8-byte setup | payload] when we have payload to send.
-        let submit_buf: Vec<u8> = if payload.is_empty() {
-            Vec::new()
-        } else {
-            let mut buf = Vec::with_capacity(8 + payload.len());
-            buf.push(setup.bm_request_type);
-            buf.push(setup.b_request);
-            buf.push((setup.w_value & 0xFF) as u8);
-            buf.push((setup.w_value >> 8) as u8);
-            buf.push((setup.w_index & 0xFF) as u8);
-            buf.push((setup.w_index >> 8) as u8);
-            buf.push((payload_len & 0xFF) as u8);
-            buf.push((payload_len >> 8) as u8);
-            buf.extend_from_slice(payload);
-            buf
-        };
+        // For OUT transfers: pass the raw payload only. The host pre-allocates
+        // an 8-byte setup prefix in new_transfer and copies our data starting
+        // at offset 8 — we must NOT include the prefix ourselves.
+        // For IN transfers: pass an empty slice; the host fills the buffer and
+        // returns the full contents (setup prefix + data); we strip the prefix below.
+        let submit_buf: Vec<u8> = payload.to_vec();
 
         xfer.submit_transfer(&submit_buf)
             .map_err(|e| anyhow::anyhow!("{:?}", e))?;
