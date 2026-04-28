@@ -34,3 +34,7 @@ results/
 # ── CMake build directories ───────────────────────────────────────────────────
 usb-bench-c/build-native/
 usb-bench-c/build-wasi/
+
+# ── Rust benchmark build artefacts ───────────────────────────────────────────
+usb-bench-rs/target/
+usb-bench-rs/target-wasi-rusb/
