@@ -27,3 +27,6 @@ Cargo.lock
 perf.data*
 flamegraph.svg
 build_errors*.txt
+
+# ── Benchmark output ─────────────────────────────────────────────────────────
+results/
