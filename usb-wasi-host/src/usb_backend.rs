@@ -44,6 +44,7 @@ use std::collections::VecDeque;
 use std::thread;
 use log::{debug, error, info, trace};
 use libc::timeval;
+use crate::instrument::CallTrace;
 use once_cell::sync::Lazy;
 use crate::AllowedUSBDevices;
 use crate::USBDeviceIdentifier;
@@ -201,15 +202,16 @@ impl HostUsbBackend for LibusbBackend {
     }
 
     fn list_devices(&mut self, allowed_devices: &AllowedUSBDevices) -> Result<Vec<(UsbDevice, DeviceDescriptor, DeviceLocation)>, LibusbError> {
-            info!("list_devices backend called.");
-            println!("[HOST] Size of DeviceDescriptor: {}", std::mem::size_of::<DeviceDescriptor>());
-            println!("[HOST] Align of DeviceDescriptor: {}", std::mem::align_of::<DeviceDescriptor>());
-            println!("[HOST] Size of DeviceLocation: {}", std::mem::size_of::<DeviceLocation>());
-            println!("[HOST] Align of DeviceLocation: {}", std::mem::align_of::<DeviceLocation>());
-            println!("[HOST] Offset of bus_number: {}", memoffset::offset_of!(DeviceLocation, bus_number));
-            println!("[HOST] Offset of device_address: {}", memoffset::offset_of!(DeviceLocation, device_address));
-            println!("[HOST] Offset of port_number: {}", memoffset::offset_of!(DeviceLocation, port_number));
-            println!("[HOST] Offset of speed: {}", memoffset::offset_of!(DeviceLocation, speed));
+            let _t = CallTrace::enter("list_devices_backend");
+            debug!("list_devices backend called.");
+            debug!("[HOST] Size of DeviceDescriptor: {}", std::mem::size_of::<DeviceDescriptor>());
+            debug!("[HOST] Align of DeviceDescriptor: {}", std::mem::align_of::<DeviceDescriptor>());
+            debug!("[HOST] Size of DeviceLocation: {}", std::mem::size_of::<DeviceLocation>());
+            debug!("[HOST] Align of DeviceLocation: {}", std::mem::align_of::<DeviceLocation>());
+            debug!("[HOST] Offset of bus_number: {}", memoffset::offset_of!(DeviceLocation, bus_number));
+            debug!("[HOST] Offset of device_address: {}", memoffset::offset_of!(DeviceLocation, device_address));
+            debug!("[HOST] Offset of port_number: {}", memoffset::offset_of!(DeviceLocation, port_number));
+            debug!("[HOST] Offset of speed: {}", memoffset::offset_of!(DeviceLocation, speed));
         unsafe {
             let mut list_ptr: *mut *mut libusb_device = std::ptr::null_mut();
             let cnt = libusb_get_device_list(
@@ -236,7 +238,7 @@ impl HostUsbBackend for LibusbBackend {
                 if !allowed_devices.is_allowed(&usb_device_id) {
                     continue;
                 }
-                println!("[HOST] processing device {:04x}:{:04x}", device_desc.idVendor, device_desc.idProduct);
+                debug!("[HOST] processing device {:04x}:{:04x}", device_desc.idVendor, device_desc.idProduct);
 
                 libusb_ref_device(dev); // Increment refcount because we store it in UsbDevice which owns it
                 let resource = UsbDevice { device: dev };
@@ -247,7 +249,7 @@ impl HostUsbBackend for LibusbBackend {
                     port_number: libusb_get_port_number(dev),
                     speed: UsbSpeed::from_raw(libusb_get_device_speed(dev) as u8)
                 };
-                println!("[HOST] device location: {:?}", location);
+                debug!("[HOST] device location: {:?}", location);
                 
                 let descriptor = DeviceDescriptor {
                     length: device_desc.bLength,
@@ -265,11 +267,11 @@ impl HostUsbBackend for LibusbBackend {
                     serial_number_index: device_desc.iSerialNumber,
                     num_configurations: device_desc.bNumConfigurations,
                 };
-                println!("[HOST] device descriptor: {:?}", descriptor);
+                debug!("[HOST] device descriptor: {:?}", descriptor);
                 
                 devices.push((resource, descriptor, location));
             }
-            println!("[HOST] found {} devices", devices.len());
+            debug!("[HOST] found {} devices", devices.len());
             libusb_free_device_list(list_ptr, 1); // 1 = unref devices in list (but we reffed the ones we kept)
             Ok(devices)
         }
@@ -366,6 +368,8 @@ impl HostUsbBackend for LibusbBackend {
     }
 
     fn claim_interface(&mut self, handle: &UsbDeviceHandle, ifac: u8) -> Result<(), LibusbError> {
+        let _t = CallTrace::enter("claim_interface")
+            .detail(&format!("iface={ifac}"));
         unsafe {
             let res = libusb_claim_interface(handle.handle, ifac as i32);
             if res < 0 {
@@ -373,7 +377,7 @@ impl HostUsbBackend for LibusbBackend {
                 error!("libusb_claim_interface failed for ifac {} with error: {:?}", ifac, err);
                 return Err(err);
             }
-            info!("libusb_claim_interface successful for ifac {}", ifac);
+            debug!("libusb_claim_interface successful for ifac {}", ifac);
             Ok(())
         }
     }
