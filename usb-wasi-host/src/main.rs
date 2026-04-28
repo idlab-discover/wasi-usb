@@ -50,6 +50,9 @@ use crate::component::usb::usb_hotplug::{Event, Info};
 pub mod usb_backend;
 pub use usb_backend::{HostUsbBackend, LibusbBackend, UsbDevice, UsbDeviceHandle};
 
+pub mod instrument;
+use instrument::CallTrace;
+
 #[derive(Debug)]
 pub struct UsbTransfer {
     transfer: *mut libusb_transfer,
@@ -197,7 +200,7 @@ extern "system" fn transfer_callback(transfer: *mut libusb_transfer) {
         let ctx = Box::from_raw(ctx_ptr);
 
         let status = (*transfer).status;
-        info!("transfer_callback fired, status: {}", status);
+        debug!("transfer_callback fired, status: {}", status);
         let result: Result<Vec<u8>, LibusbError> =
             if status == LIBUSB_TRANSFER_COMPLETED {
                 let mut data_vec = Vec::new();
@@ -214,14 +217,14 @@ extern "system" fn transfer_callback(transfer: *mut libusb_transfer) {
                         packet_results.push((desc.actual_length, desc.status as i32));
                         total_actual_len += desc.actual_length;
                     }
-                    info!("ISO transfer received {} total actual bytes", total_actual_len);
+                    debug!("ISO transfer received {} total actual bytes", total_actual_len);
 
                     // Store per-packet results so await-iso-transfer can read them
                     *ctx.iso_packet_results.lock().unwrap() = Some(packet_results);
 
                     // Copy full buffer (stride = packet_size, not actual_length)
                     let full_len = (*transfer).length as usize;
-                    info!("ISO transfer received {} bytes of data", full_len);
+                    debug!("ISO transfer received {} bytes of data", full_len);
                     let buf_ptr = (*transfer).buffer;
                     if !buf_ptr.is_null() && full_len > 0 {
                         let data_slice = std::slice::from_raw_parts(buf_ptr, full_len);
@@ -345,6 +348,16 @@ impl HostTransfer for MyState {
     ) -> Result<(), component::usb::transfers::LibusbError> {
         debug!("Submit transfer");
         let usb_transfer = self.table.get_mut(&self_).expect("Failed to get transfer");
+        let _xfer_type_raw = unsafe { (*usb_transfer.transfer).transfer_type };
+        let _xfer_dir = unsafe { (*usb_transfer.transfer).endpoint & 0x80 != 0 };
+        let _t = CallTrace::enter("submit_transfer").detail(&format!(
+            "xfer_type={} len={} dir={}",
+            match _xfer_type_raw {
+                0 => "Control", 1 => "Isochronous", 2 => "Bulk", 3 => "Interrupt", _ => "Unknown"
+            },
+            usb_transfer.buf_len,
+            if _xfer_dir { "In" } else { "Out" },
+        ));
         debug!("Transfer: {:?}", usb_transfer);
         let transfer_ptr = usb_transfer.transfer;
 
@@ -385,9 +398,9 @@ impl HostTransfer for MyState {
                     }
                 }
             } else if (*transfer_ptr).endpoint & 0x80 != 0 {
-                info!("IN transfer");
+                debug!("IN transfer");
             } else {
-                info!("OUT transfer");
+                debug!("OUT transfer");
                 if data.len() as u32 != usb_transfer.buf_len {
                     error!(
                         "Invalid data length for OUT transfer: {}, expected {}",
@@ -451,10 +464,21 @@ impl HostTransfer for MyState {
 
     fn drop(&mut self, self_: Resource<UsbTransfer>) -> Result<(), Error> {
         trace!("Drop transfer");
-        if let Ok(transfer) = self.table.get(&self_) {
+        // `await_transfer` already calls `table.delete` on successful completion,
+        // so this delete only succeeds for transfers that were never awaited.
+        if let Ok(transfer) = self.table.delete(self_) {
             unsafe {
-                if !transfer.completed.load(Ordering::SeqCst) {
+                if transfer.completed.load(Ordering::SeqCst) {
+                    // Callback already fired and called libusb_free_transfer.
+                    // Don't free again.
+                } else if transfer.receiver.is_some() {
+                    // Transfer was submitted and the callback hasn't fired yet.
+                    // Cancel it; the callback will call libusb_free_transfer.
                     let _ = libusb_cancel_transfer(transfer.transfer);
+                } else {
+                    // Transfer was allocated (new_transfer) but never submitted.
+                    // No callback will ever fire; free it ourselves.
+                    libusb_free_transfer(transfer.transfer);
                 }
             }
         }
@@ -472,7 +496,8 @@ impl crate::component::usb::transfers::Host for MyState {
         &mut self,
         self_: Resource<UsbTransfer>,
     ) -> Result<TransferResult, LibusbError> {
-        info!("Awaiting transfer");
+        debug!("Awaiting transfer");
+        let _t = CallTrace::enter("await_transfer");
         let usb_transfer = self.table.get_mut(&self_).expect("Failed to get transfer");
 
         if usb_transfer.receiver.is_none() {
@@ -485,7 +510,7 @@ impl crate::component::usb::transfers::Host for MyState {
 
         let data = match receiver.await {
             Ok(Ok(data)) => {
-                info!("Transfer completed, {} bytes", data.len());
+                debug!("Transfer completed, {} bytes", data.len());
                 data
             }
             Ok(Err(e)) => return Err(e),
@@ -526,6 +551,7 @@ impl HostUsbDevice for MyState {
         self_: Resource<UsbDevice>,
     ) -> Result<Resource<UsbDeviceHandle>, LibusbError> {
         let usb_device = self.table.get(&self_).expect("Failed to get device");
+        let _t = CallTrace::enter("open_device");
         let handle = self.backend.open(usb_device)?;
         let resource = self.table.push(handle).or(Err(LibusbError::Other))?;
         Ok(resource)
@@ -698,10 +724,14 @@ impl HostDeviceHandle for MyState {
         buf_size: u32,
         opts: TransferOptions,
     ) -> Result<Resource<UsbTransfer>, component::usb::device::LibusbError> {
-        info!(
+        debug!(
             "Starting new_transfer with buf_size: {buf_size} and transfer type: {:?}",
             xfer_type
         );
+        let _t = CallTrace::enter("new_transfer").detail(&format!(
+            "xfer_type={:?} buf_size={} ep={:#04x} iso_pkts={}",
+            xfer_type, buf_size, opts.endpoint, opts.iso_packets,
+        ));
 
         let usb_handle = self.table.get(&self_).expect("Failed to get device handle");
         debug!("Retrieved USB device handle: {:?}", usb_handle.handle);
@@ -790,7 +820,7 @@ impl HostDeviceHandle for MyState {
                     debug!("Iso packet {} configured with length: {}", i, packet_len);
                 }
                 (*transfer_ptr).num_iso_packets = iso_packets;
-                info!("Isochronous transfer configured with {} packets", iso_packets);
+                debug!("Isochronous transfer configured with {} packets", iso_packets);
             }
 
             let transfer_resource = self
@@ -805,7 +835,7 @@ impl HostDeviceHandle for MyState {
                     iso_packet_results: Arc::new(Mutex::new(None)),
                 })
                 .or(Err(LibusbError::Other))?;
-            info!("Transfer resource created successfully");
+            debug!("Transfer resource created successfully");
 
             Ok(transfer_resource)
         }
@@ -835,6 +865,7 @@ impl crate::component::usb::device::Host for MyState {
     fn list_devices(
         &mut self,
     ) -> Result<Vec<(Resource<UsbDevice>, DeviceDescriptor, DeviceLocation)>, LibusbError> {
+        let _t = CallTrace::enter("list_devices");
         let devices = self.backend.list_devices(&self.allowed_usbdevices)?;
         let mut result = Vec::with_capacity(devices.len());
         for (dev, desc, loc) in devices {
@@ -873,9 +904,20 @@ impl crate::component::usb::usb_hotplug::Host for MyState {
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let cli = CliParser::parse();
-    env_logger::Builder::new()
-        .filter_module("usb_wasi_host", cli.debug_level.parse().unwrap_or(LevelFilter::Info))
-        .init();
+
+    // Logging setup:
+    // - If RUST_LOG is set, honour it exactly (supports wasi_usb_trace=info etc.)
+    // - Otherwise fall back to --debug_level filter for the usb_wasi_host module.
+    {
+        let mut builder = env_logger::Builder::from_default_env();
+        if std::env::var("RUST_LOG").is_err() {
+            builder.filter_module(
+                "usb_wasi_host",
+                cli.debug_level.parse().unwrap_or(LevelFilter::Info),
+            );
+        }
+        builder.init();
+    }
 
     info!("Starting WASM component");
     let args: Vec<String> = std::env::args().collect();
