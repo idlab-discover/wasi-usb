@@ -91,6 +91,41 @@ build-enumerate-devices-go:
 enumerate-devices-go: build-host build-enumerate-devices-go
     sudo {{HOST}} -c usb-wasi-guest/examples/enumerate-devices-go/out/main.component.wasm
 
+# ── Benchmark suite (thesis evaluation) ─────────────────────────────────────
+
+# Build all benchmark binaries (C1+C2 via CMake, C3+C5 via Cargo)
+bench-build:
+    # C1 — native libusb (C)
+    cmake -B usb-bench-c/build-native usb-bench-c
+    cmake --build usb-bench-c/build-native
+    # C2 — wasi-libusb (C WASM)
+    cmake -B usb-bench-c/build-wasi usb-bench-c \
+        -DCMAKE_TOOLCHAIN_FILE=usb-bench-c/toolchain-wasi.cmake
+    cmake --build usb-bench-c/build-wasi
+    # C3 — native rusb (Rust)
+    cargo build --release --bins --manifest-path usb-bench-rs/Cargo.toml
+    # C4 — wasi-rusb (Rust + rusb → libusb-wasi.a → WIT)
+    bash bench/build-c4.sh
+    # C5 — wasi-raw-wit (Rust WASM)
+    cargo build --release --bins --target wasm32-wasip2 \
+        --manifest-path usb-bench-rs/Cargo.toml
+
+# Run full benchmark suite (requires USB devices connected, run as root)
+bench-run *ARGS:
+    sudo bash bench/run.sh {{ARGS}}
+
+# Quick smoke run — 1 iteration per cell, no real devices needed for dry-run
+bench-smoke:
+    sudo bash bench/run.sh --smoke
+
+# Dry-run: print all commands without executing
+bench-dry:
+    bash bench/run.sh --dry-run --smoke
+
+# Run analysis on the most recent results directory
+bench-analyze:
+    python3 bench/analyze.py results/$(ls -t results/ | head -1)
+
 # ── Build all guests ─────────────────────────────────────────────────────────
 
 build-all: build-host build-webcam \
