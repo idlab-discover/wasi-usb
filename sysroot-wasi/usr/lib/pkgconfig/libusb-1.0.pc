@@ -1,0 +1,21 @@
+# libusb-1.0.pc — WASI cross-compile sysroot for rusb (C4 condition)
+#
+# Wijst pkg-config naar libusb-wasi.a (Robbe Leroy's WIT-backed build),
+# NIET naar de systeem-libusb van de host.
+#
+# Gebruik:
+#   export PKG_CONFIG_LIBDIR=<repo>/sysroot-wasi/usr/lib/pkgconfig
+#   export PKG_CONFIG_ALLOW_CROSS=1
+#   cargo build --target wasm32-wasip2 --features c4-rusb-wasi
+#
+# De header libusb.h is identiek aan vanilla libusb 1.0.27 — alleen het
+# .a-archive verschilt (WASI-backend i.p.v. OS-native backend).
+
+prefix=${pcfiledir}/../../..
+libusb_root=${prefix}/../libusb
+
+Name: libusb-1.0
+Description: libusb-1.0 cross-compiled for WASI (WIT-backed by Robbe Leroy)
+Version: 1.0.27
+Libs: -L${libusb_root} -lusb-wasi-rust
+Cflags: -I${libusb_root}/libusb
