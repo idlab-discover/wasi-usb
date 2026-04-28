@@ -30,3 +30,7 @@ build_errors*.txt
 
 # ── Benchmark output ─────────────────────────────────────────────────────────
 results/
+
+# ── CMake build directories ───────────────────────────────────────────────────
+usb-bench-c/build-native/
+usb-bench-c/build-wasi/
