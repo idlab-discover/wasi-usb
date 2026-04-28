@@ -85,6 +85,22 @@ just streams-test 0781 5581 0 0x02 0x81
 | `just ps5-maze` | Pacman controlled by PS5/Xbox |
 | `just build-all` | Build everything |
 
+## Benchmarking
+
+The repository includes a full 5-condition benchmark suite (C1–C5) covering native and WASI USB access in both C and Rust.
+
+See **[BENCHMARKING.md](./BENCHMARKING.md)** for:
+- The complete benchmark matrix (conditions × workloads)
+- Build instructions for all conditions including C4 (rusb → WASM via WIT)
+- Run and analysis instructions
+- Technical details of the C4 implementation
+
+```bash
+just bench-build   # build all 5 conditions
+just bench-smoke   # quick sanity run (1 iteration per cell)
+just bench-run     # full measurement round
+```
+
 ## WIT design notes
 
 - `flags event { arrived; left; }` — bitflags, not an enum. Check `Event::ARRIVED` / `Event::LEFT`.
