@@ -1,0 +1,59 @@
+[package]
+name = "usb-bench-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Shared benchmark harness for the WASI-USB thesis evaluation."
+build = "build.rs"
+
+[lib]
+path = "src/lib.rs"
+
+# w_bulk binary (C3 native-rusb, C5 wasi raw-WIT in F3)
+[[bin]]
+name = "w_bulk"
+path = "src/bin/w_bulk.rs"
+
+# w_ctrl binary (C3 native-rusb, C5 wasi raw-WIT)
+[[bin]]
+name = "w_ctrl"
+path = "src/bin/w_ctrl.rs"
+
+# w_int binary (C3 native-rusb, C5 wasi raw-WIT)
+[[bin]]
+name = "w_int"
+path = "src/bin/w_int.rs"
+
+# w_iso binary (C3 native-rusb via libusb1-sys, C5 wasi raw-WIT)
+[[bin]]
+name = "w_iso"
+path = "src/bin/w_iso.rs"
+
+# Shared deps (work on both native and wasm32-wasip2)
+[dependencies]
+anyhow = "1"
+
+# Native-only deps
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+libc = "0.2"
+rusb = "0.9"
+# libusb1-sys: direct access to async ISO transfer API (rusb 0.9 has no sync ISO)
+libusb1-sys = "0.7"
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+# wit-bindgen for WasmTransport (C5 — raw WIT path, same version as usb-wasi-guest)
+wit-bindgen = "0.41.0"
+# rusb + libusb1-sys for C4 (rusb→libusb-wasi.a→WIT via pkg-config cross-compile)
+# Only activated when building with --features c4-rusb-wasi
+rusb        = { version = "0.9", optional = true }
+libusb1-sys = { version = "0.7", optional = true }
+
+# Feature flag: enables rusb-based transport for wasm32-wasip2 (C4 condition).
+# Without this flag, wasm builds use raw WIT bindings (C5 condition).
+[features]
+default = []
+c4-rusb-wasi = ["dep:rusb", "dep:libusb1-sys"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

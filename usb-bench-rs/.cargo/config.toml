@@ -1,0 +1,10 @@
+# .cargo/config.toml — wasm32-wasip2 configuratie voor usb-bench-rs
+#
+# Rust-binaries (C4 en C5) hebben GEEN guest_component_type.o nodig:
+# usb-bench-rs/src/bindings.rs levert de component-type custom section
+# via wit_bindgen::generate!{ world: "guest", path: "../wit" }.
+#
+# guest_component_type.o is alleen nodig voor C-binaries (C2) die geen
+# wit-bindgen hebben — die linkage zit in CMakeLists.txt.
+#
+# Momenteel geen extra rustflags nodig voor wasm32-wasip2.
